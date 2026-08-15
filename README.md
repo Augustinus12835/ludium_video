@@ -41,111 +41,48 @@ The only paid external service is **ElevenLabs**, used for both text-to-speech
 and Scribe speech-to-text. TTS returns exact word timestamps, which is what lets
 animations and subtitles sync to the narration at word precision.
 
-## What you need
+## Getting started
 
-Two accounts, nothing else is paid:
+You need two accounts, nothing else is paid: a **Claude subscription** (Pro or
+Max) at [claude.ai](https://claude.ai) and an **ElevenLabs account** at
+[elevenlabs.io](https://elevenlabs.io). No GitHub account needed.
 
-1. A **Claude subscription** (Pro or Max) at [claude.ai](https://claude.ai) —
-   all AI steps run inside Claude Code under your subscription.
-2. An **ElevenLabs account** at [elevenlabs.io](https://elevenlabs.io) — used
-   for the narration voice and for transcription.
-
-No GitHub account is needed — downloading the code is anonymous.
-
-## Getting started — complete walkthrough
-
-Everything below is typed into the **Terminal** app. Copy and paste each block
-in order. The walkthrough assumes Ubuntu/Debian Linux; for macOS or Windows,
-see the note at the end of this section.
-
-**Step 1 — install the system tools** (Python, git, ffmpeg, LaTeX for the
-animations). One command, takes a few minutes:
-
-```bash
-sudo apt update && sudo apt install -y git python3-venv ffmpeg \
-    texlive-latex-extra texlive-fonts-extra texlive-science cm-super \
-    dvisvgm libpango1.0-dev
-```
-
-**Step 2 — install Claude Code** and sign in with your Claude account:
+**1. Install Claude Code** — open the Terminal app, paste:
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-Then run `claude` once and follow the sign-in prompts. (Full instructions:
-[claude.com/claude-code](https://claude.com/claude-code).)
+then run `claude` and follow the sign-in prompts.
 
-**Step 3 — download this project** (this copies the code into a `ludium_video`
-folder — no account needed):
+**2. Get your ElevenLabs credentials** — on
+[elevenlabs.io](https://elevenlabs.io): profile (bottom-left) → **API Keys** →
+create a key with BOTH **Text to Speech** and **Speech to Text** permissions;
+then open **Voices**, pick a voice, and copy its **Voice ID**.
 
-```bash
-git clone https://github.com/Augustinus12835/ludium_video.git
-cd ludium_video
+**3. Let Claude set up everything else.** Run `claude` and paste:
+
+```
+Set up https://github.com/Augustinus12835/ludium_video for me: clone it,
+install the system and Python dependencies it needs, ask me for my ElevenLabs
+API key and voice ID and write them into .env, then run
+scripts/setup_pronunciation_dict.py.
 ```
 
-**Step 4 — install the Python packages** (self-contained inside the project
-folder, doesn't touch the rest of your system):
+Claude clones the code, installs everything for your OS, and wires in your
+credentials — including the bundled math pronunciation dictionary (add your
+own terms later in the ElevenLabs dashboard; the pipeline always uses the
+latest version).
 
-```bash
-python3 -m venv venv
-venv/bin/pip install -r requirements.txt
-```
-
-**Step 5 — connect your ElevenLabs account.** In your browser, on
-[elevenlabs.io](https://elevenlabs.io):
-
-- Create an **API key**: click your profile (bottom-left) → **API Keys** →
-  **Create API Key**. Make sure the key has BOTH **Text to Speech** and
-  **Speech to Text** permissions enabled. Copy the key (starts with `sk_`).
-- Pick a **voice**: open **Voices**, choose any voice you like (or a clone of
-  your own voice), click it, and copy its **Voice ID**.
-
-Then create your settings file and open it in a simple editor:
-
-```bash
-cp .env.example .env
-nano .env
-```
-
-Paste your key after `ELEVENLABS_API_KEY=` and your voice ID after
-`ELEVENLABS_VOICE_ID=`, then press `Ctrl+O`, `Enter` to save and `Ctrl+X` to
-exit.
-
-**Step 6 — set up the pronunciation dictionary** (one command; it uploads the
-bundled math dictionary — `sinh`/`cosh`, Greek letters, math abbreviations —
-to your ElevenLabs account and saves its ID into `.env` automatically):
-
-```bash
-venv/bin/python scripts/setup_pronunciation_dict.py
-```
-
-Later you can add your own entries (names, domain terms, acronyms) to the
-dictionary in the ElevenLabs dashboard — the pipeline always uses the latest
-version. Reference: `docs/elevenlabs_pronunciation_dict.md`.
-
-**Step 7 — make your first video.** Start Claude Code inside the project
-folder:
-
-```bash
-claude
-```
-
-and type (replace the URL with any recorded math talk):
+**4. Make your first video** — inside the `ludium_video` folder, run `claude`
+and type (any recorded math talk works):
 
 ```
 /run-pipeline https://www.youtube.com/watch?v=... --math
 ```
 
-That's it — Claude supervises the whole run. Finished videos land in
-`pipeline/<source>/Video-N/final_video.mp4` with subtitles next to them.
-
-> **macOS**: install [Homebrew](https://brew.sh), then
-> `brew install git python ffmpeg pango pkg-config` and
-> `brew install --cask mactex-no-gui`; everything else is identical.
-> **Windows**: use WSL (Ubuntu) and follow the steps as written, or see
-> [Manim's install guide](https://docs.manim.community/en/stable/installation.html)
-> for native setup.
+Finished videos land in `pipeline/<source>/Video-N/final_video.mp4` with
+subtitles next to them.
 
 ## Usage
 
