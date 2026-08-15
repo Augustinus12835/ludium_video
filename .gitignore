@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Pipeline output (large media) and source inputs
+pipeline/*
+!pipeline/.gitkeep
+inputs/*
+!inputs/.gitkeep
+
+# Manim / render scratch
+media/
+
+# Local Claude Code settings
+.claude/settings.local.json
