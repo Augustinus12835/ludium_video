@@ -197,7 +197,8 @@ fallback transcription — compile and subtitle must run serially.
 | `segment_concepts.py` | Materialize segmentation: `--apply RESPONSE.json` or `--single-video` |
 | `generate_scripts.py` | Script prompt templates (math/technical) + helpers |
 | `verify_math.py` | SymPy helpers for math verification |
-| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps (pronunciation dictionary support) |
+| `setup_pronunciation_dict.py` | One-time: upload the bundled pronunciation dictionary, wire its ID into .env |
+| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps (applies the pronunciation dictionary) |
 | `fix_tts_sentence.py` | Zero-shift sentence-swap TTS fix (edit source → run → recompile) |
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
@@ -215,7 +216,8 @@ fallback transcription — compile and subtitle must run serially.
 ```env
 ELEVENLABS_API_KEY=sk_...         # needs text_to_speech AND speech_to_text enabled
 ELEVENLABS_VOICE_ID=...           # narrator voice
-ELEVENLABS_PRONUNCIATION_DICT_ID= # optional; see docs/elevenlabs_pronunciation_dict.md
+ELEVENLABS_PRONUNCIATION_DICT_ID= # set by scripts/setup_pronunciation_dict.py (bundled
+                                  # math dictionary; extend it for your own content)
 ```
 
 No other keys. LLM steps run as Claude Code subagents under your subscription.

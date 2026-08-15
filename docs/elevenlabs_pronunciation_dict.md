@@ -1,6 +1,8 @@
 # ElevenLabs Pronunciation Dictionary — Math Notation
 
-Words and notations whose written form differs from how a human reader would say them in mathematical English. Add these to the ElevenLabs pronunciation dictionary so generated narration speaks them correctly.
+Words and notations whose written form differs from how a human reader would say them in mathematical English. The ready-to-upload dictionary is `elevenlabs_pronunciation_dict.pls` in this folder — `python scripts/setup_pronunciation_dict.py` uploads it to your ElevenLabs account and wires its ID into `.env` as part of the default setup, and every TTS request then applies it.
+
+This file is the human-readable reference for what's in the dictionary and why. **Extend the live dictionary to suit your own production needs** — proper nouns, domain terms, recurring acronyms — via the ElevenLabs dashboard or rules API; requests are keyed by dictionary ID only, so the latest version is always used. Keep the `.pls` in sync when you add entries.
 
 ElevenLabs supports two entry types:
 - **alias** — replace the source token with a phonetic respelling (simplest, used throughout below)

@@ -57,12 +57,15 @@ git clone <this-repo> && cd ludium_video
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 cp .env.example .env      # fill in ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID
+venv/bin/python scripts/setup_pronunciation_dict.py
 ```
 
-Optional but recommended: create an ElevenLabs **pronunciation dictionary** from
-`docs/elevenlabs_pronunciation_dict.pls` (fixes `sinh`/`cosh`, Greek-letter
-words, and other math notation TTS mangles) and set
-`ELEVENLABS_PRONUNCIATION_DICT_ID` in `.env`. See
+The last step uploads the bundled **pronunciation dictionary**
+(`docs/elevenlabs_pronunciation_dict.pls` — `sinh`/`cosh`, Greek-letter words,
+and other math notation TTS mangles) to your ElevenLabs account and wires its
+ID into `.env`; it is attached to every TTS request from then on. Add entries
+to the live dictionary to suit your own production needs (proper nouns, domain
+terms, recurring acronyms) — requests always use the latest version. Reference:
 `docs/elevenlabs_pronunciation_dict.md`.
 
 ## Usage
