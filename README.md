@@ -60,29 +60,44 @@ then run `claude` and follow the sign-in prompts.
 create a key with BOTH **Text to Speech** and **Speech to Text** permissions;
 then open **Voices**, pick a voice, and copy its **Voice ID**.
 
-**3. Let Claude set up everything else.** Run `claude` and paste:
+**3. Let Claude install the project.** Run `claude` and paste:
 
 ```
-Set up https://github.com/Augustinus12835/ludium_video for me: clone it,
-install the system and Python dependencies it needs, ask me for my ElevenLabs
-API key and voice ID and write them into .env, then run
-scripts/setup_pronunciation_dict.py.
+Set up https://github.com/Augustinus12835/ludium_video for me: clone it and
+install the system and Python dependencies it needs.
 ```
 
-Claude clones the code, installs everything for your OS, and wires in your
-credentials — including the bundled math pronunciation dictionary (add your
-own terms later in the ElevenLabs dashboard; the pipeline always uses the
-latest version).
+Claude clones the code and installs everything for your OS.
 
-**4. Make your first video** — inside the `ludium_video` folder, run `claude`
-and type (any recorded math talk works):
+**4. Add your credentials** — your keys stay in a local file that only you
+edit and that git never uploads. Inside the `ludium_video` folder:
 
-```
-/run-pipeline https://www.youtube.com/watch?v=... --math
+```bash
+cp .env.example .env
 ```
 
-Finished videos land in `pipeline/<source>/Video-N/final_video.mp4` with
-subtitles next to them.
+Open `.env` in any text editor and paste your API key after
+`ELEVENLABS_API_KEY=` and your voice ID after `ELEVENLABS_VOICE_ID=`. Then set
+up the bundled math pronunciation dictionary (one command; add your own terms
+later in the ElevenLabs dashboard — the pipeline always uses the latest
+version):
+
+```bash
+venv/bin/python scripts/setup_pronunciation_dict.py
+```
+
+**5. Make your first video** — inside the `ludium_video` folder, run `claude`
+and type one of:
+
+```
+/run-pipeline https://www.youtube.com/watch?v=... --math        # pure math
+/run-pipeline https://www.youtube.com/watch?v=... --technical   # anything else: science, finance, CS, engineering
+```
+
+A YouTube URL is just one option — see [Input types](#input-types) for the
+others (a recording of your own, a book chapter, a slide deck). Finished
+videos land in `pipeline/<source>/Video-N/final_video.mp4` with subtitles
+next to them.
 
 ## Usage
 
