@@ -18,6 +18,11 @@ Source → Transcribe → Clean → Segment → per video: Script → Verify mat
 
 ## Example videos
 
+Start with **[The Video That Made Itself](https://www.youtube.com/watch?v=x-iBXDS6faQ)** —
+a walkthrough of this pipeline, produced end to end by the pipeline: every
+animation, the narration, and the subtitles in it came out of the flow described
+below, with the repository's own documentation as the source material.
+
 Videos produced with this pipeline are published on the
 [Ludium YouTube channel](https://www.youtube.com/@LudiumAI), with companion
 interactive courses on [ludium.ai](https://ludium.ai).
