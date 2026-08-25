@@ -101,7 +101,7 @@ _SENTENCE_A = re.compile(
     r"(?:^|[.!?:;]\s+|\n\s*)"
     r"(A(?: (?:is|has|equals|times|plus|minus|transpose|inverse|acts|maps|becomes|"
     r"sub|squared|cubed|cross|hat|over|to the)"
-    # hyphenated variable forms (A-hat, A-sub-X, A-X, A-one) still read as "uh" at
+    # hyphenated variable forms (A-hat, A-X, A-one; legacy A-sub-X) still read as "uh" at
     # sentence start — the hyphen binds the token but doesn't rescue leading "A".
     r"|-(?:hat|sub|prime|bar|tilde|one|two|three|four|five|six|seven|eight|nine|ten|[A-Z]))"
     r"\b[^.!?\n]{0,30})"

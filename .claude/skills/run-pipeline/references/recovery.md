@@ -53,8 +53,10 @@ VERIFY_MATH_SYSTEM). Summary:
 | `variable_a` | uppercase the variable: "A-one", "A times t", "slope A" (lowercase `a` reads as the article; only `a` collides) |
 | `sentence_a` | rephrase so "A" isn't the first word ("Matrix A times…") |
 
-Preferred notation forms (correct, never flagged): `Ax`→"A-X", `A_x`→"A-sub-X",
-`a_1`→"A-one", `Â`→"A-hat", `\bar{x}`→"X-bar".
+Preferred notation forms (correct, never flagged): `Ax`→"A-X", `A_x`→"A-X",
+`sigma_n`→"sigma-N", `a_1`→"A-one", `Â`→"A-hat", `\bar{x}`→"X-bar". Subscripts are
+hyphen-bound with NO spoken "sub" (2026-08-25) — legacy "A-sub-X" narration is not
+wrong, just verbose; don't rewrite an already-voiced video for it.
 
 Fix the source the report names — `natural_narration` in `math_verification.json` for math
 frames, `script.json` narration for visual frames (both when unsure). On-screen text keeps

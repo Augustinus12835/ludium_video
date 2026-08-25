@@ -120,13 +120,19 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      drifting letters (ElevenLabs voices "A X" as two loose letters; "A-X" pulls them
      together). Applies to math/finance/stats symbols in the `narration` field:
        - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B".
-       - Letter/word subscripts: `A_x` → "A-sub-X", `B_y` → "B-sub-Y",
-         `F_net` → "F-sub-net" (numeric subscripts keep `a_1` → "A-one", above).
+       - Letter/word subscripts — hyphen only, never the spoken word "sub":
+         `A_x` → "A-X", `B_y` → "B-Y", `sigma_n` → "sigma-N", `F_net` → "F-net"
+         (numeric subscripts keep `a_1` → "A-one", above). The frame shows the
+         subscript, so voicing "sub" adds nothing and grates in subscript-heavy
+         narration. Voice-verified 2026-08-25: the hyphen alone keeps the letters
+         apart — "A-N", "M-R", "X-I" read as spelled letters, not "an" / "mister"
+         / "xi". Reserve an explicit "sub" for a compound subscript that would
+         otherwise be ambiguous (`x_{{i+1}}` → "X sub I plus one").
        - Hats / accents: `Â` → "A-hat", `x̂` → "X-hat", `\bar{{x}}` → "X-bar". The
          hyphen also stops "A-hat" being misread as "uh hat".
      On-screen labels/equations keep normal notation; only the spoken narration hyphenates.
    - **Never begin a sentence with the variable name "A"** — including the hyphenated
-     forms above (`A-hat`, `A-sub-X`, `A-X`). A sentence-initial "A" is read as the
+     forms above (`A-hat`, `A-X`). A sentence-initial "A" is read as the
      article "a" (uh) — "A times B equals C" comes out "Uh times B equals C", and the
      hyphen does NOT rescue it ("A-hat is ..." still leads with "uh"). When "A" names
      a matrix, vector, variable, list, or column, lead with the noun it labels:
@@ -305,14 +311,20 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — especially
          them together):
            - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B",
              `rθ` → "R-theta".
-           - Letter/word subscripts: `A_x` → "A-sub-X", `B_y` → "B-sub-Y",
-             `F_net` → "F-sub-net" (numeric subscripts keep "A-one" above).
+           - Letter/word subscripts — hyphen only, never the spoken word "sub":
+             `A_x` → "A-X", `sigma_n` → "sigma-N", `F_net` → "F-net" (numeric
+             subscripts keep "A-one" above). The slide shows the subscript, so
+             voicing "sub" adds nothing and grates when subscripts are frequent;
+             the hyphen alone keeps the letters apart (voice-verified 2026-08-25:
+             "A-N" / "M-R" / "X-I" read as spelled letters). Reserve an explicit
+             "sub" for a compound subscript that would otherwise be ambiguous
+             (`x_{{i+1}}` → "X sub I plus one").
            - Hats / accents: `Â` → "A-hat", `x̂` → "X-hat", `\bar{{x}}` → "X-bar",
              `\tilde{{p}}` → "P-tilde". The hyphen also stops "A-hat" being misread as
              "uh hat".
          On-screen equations keep normal notation; only the spoken narration hyphenates.
    - **Never begin a sentence with the variable name "A"** — including the hyphenated
-     forms above (`A-hat`, `A-sub-X`, `A-X`, `A-one`). A sentence-initial "A" is read
+     forms above (`A-hat`, `A-X`, `A-one`). A sentence-initial "A" is read
      as the article "a" (uh) — "A is a matrix with ..." comes out "Uh is a matrix
      with ...", and the hyphen does NOT rescue it ("A-hat is ..." still leads with
      "uh"). When "A" names a matrix, vector, or variable, lead with the noun it
