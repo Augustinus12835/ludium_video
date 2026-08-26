@@ -61,7 +61,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 then run `claude` and follow the sign-in prompts.
 
 **2. Get your ElevenLabs credentials** — on
-[elevenlabs.io](https://elevenlabs.io): profile (bottom-left) → **API Keys** →
+[elevenlabs.io](https://elevenlabs.io): Developers (bottom-left) → **API Keys** →
 create a key with BOTH **Text to Speech** and **Speech to Text** permissions;
 then open **Voices**, pick a voice, and copy its **Voice ID**.
 
