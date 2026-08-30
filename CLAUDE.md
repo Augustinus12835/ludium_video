@@ -54,20 +54,30 @@ python scripts/pipeline.py video LECTURE_NAME/Video-3 --technical --no-review
 python scripts/pipeline.py status LECTURE_NAME
 ```
 
+With a YouTube URL whose title makes a poor folder name, pass `--folder <Name>`
+to name the pipeline folder explicitly. **Grounding a recorded lecture:** if you
+have the lecturer's official notes/handout, save them as Markdown at
+`pipeline/<L>/source_lecture_notes.md` before the clean step — `render_step_prompt.py
+clean|script` inject them automatically as ground truth for every equation and
+worked example (an ASR transcript never sees the board).
+
 ### Pipeline Modes
 
 Two modes. Math is auto-detected from folder prefixes (`Calculus_`,
-`Linear_Algebra_`, `Statistics_`, `Probability_`, `Differential_Equations_`);
-otherwise pass a flag explicitly.
+`Single_Variable_Calculus_`, `Multivariable_Calculus_`, `Linear_Algebra_`,
+`Statistics_`, `Probability_`, `Differential_Equations_`); otherwise pass a
+flag explicitly.
 
 - **Math** (`--math`) — pure math. The script declares each frame's
   `frame_class` (`math`/`visual`) at generation time. Math frames get
   `math_steps` verified with SymPy; `visual` frames (intuition, concept maps,
   big-picture structure) skip verification and are authored free-form from
-  narration + visual description. Because visual narration skips the
-  verify_math TTS rewrite, the math script prompt injects
-  `MATH_NARRATION_TTS_RULES` (scripts/utils/tts_rules.py) so narration is
-  TTS-safe at script time. Manim animates every frame.
+  narration + visual description. Every frame's narration is spoken VERBATIM
+  from `script.json` — verify_math checks the math and extracts on-screen
+  steps only (its `natural_narration` TTS rewrite was retired 2026-08-30) —
+  so the math script prompt injects `MATH_NARRATION_TTS_RULES`
+  (scripts/utils/tts_rules.py) to make narration TTS-safe at script time.
+  Manim animates every frame.
 - **Technical** (`--technical`) — math + diagrams + code (finance, CS,
   engineering, physics). Frame classes are `math`/`code`/`visual`: math frames
   get `math_steps` + SymPy, code frames get `code_steps` (traced execution) and
@@ -123,19 +133,16 @@ Spoken problems live in the **narration text**, not the Manim `.py`. On-screen
 numerals are correct and stay as digits; only the spoken text changes.
 
 1. Identify the frame (workflow above).
-2. **Find the true narration source.** TTS does NOT always read `script.json`:
-   `generate_tts_elevenlabs.py:get_natural_narration()` prefers
-   `natural_narration` from `math_verification.json` when the frame is a
-   verified math frame (`verification_status` ∈ `correct`/`corrected`).
-   - Math frame with `natural_narration` → fix it in `math_verification.json`.
-   - Visual frame (or no entry) → fix `script.json` `frames[N].narration`.
-   - When in doubt, fix BOTH so they stay consistent.
+2. **Find the true narration source.** `script.json` `frames[N].narration` for
+   every frame class (since 2026-08-30). LEGACY videos only:
+   `generate_tts_elevenlabs.py:get_natural_narration()` still prefers a
+   verified `natural_narration` from `math_verification.json` when that field
+   exists — the audio was voiced from it, so fix it there (both when in doubt).
 3. Apply the spoken-text rule: **ZERO Arabic numerals in spoken narration** —
    spell every number out in English, matching the value the slide displays.
    Same for differentials (`d x` not `dx`), Greek letters, bare acronyms
    (spaced letters), and the lowercase variable `a` (write "A" — lowercase `a`
-   reads as the article "uh"). Full rules: `VERIFY_MATH_SYSTEM` in
-   `scripts/utils/verify_prompts.py` and `scripts/utils/tts_rules.py`.
+   reads as the article "uh"). Full rules: `scripts/utils/tts_rules.py`.
 4. **Fix the audio with the sentence-swap tool (STANDARD workflow — zero
    shift, no Manim re-render).** `scripts/fix_tts_sentence.py` diffs the edited
    source against the audio's stored text, regenerates only the changed

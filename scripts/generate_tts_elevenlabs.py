@@ -2,8 +2,8 @@
 """
 TTS Audio Generation Script using ElevenLabs API
 
-Generates one MP3 per frame from the script's flat narration text, preferring the
-TTS-safe natural_narration from math_verification.json for verified math frames.
+Generates one MP3 per frame from the script's flat narration text, spoken verbatim
+(a LEGACY math frame's natural_narration in math_verification.json is still honoured).
 Word-level timestamps come back with each synthesis and are saved next to the audio
 (audio/frame_N_timestamps.json) for downstream steps (animate, subtitles).
 
@@ -122,10 +122,14 @@ def load_math_verification(script_dir: str) -> Optional[Dict]:
 
 def get_natural_narration(frame_num: int, original_text: str, math_data: Optional[Dict]) -> str:
     """
-    Get the best narration text for a frame.
+    Get the spoken narration text for a frame.
 
-    Prefers natural_narration from math_verification.json if available,
-    otherwise falls back to the original text.
+    The norm is the script.json narration (`original_text`) — since 2026-08-30
+    verify_math no longer writes a `natural_narration` TTS rewrite, so every
+    frame class is voiced verbatim from the script. A verified
+    `natural_narration` is still honoured when present so LEGACY videos (whose
+    script narration predates the TTS-safety rules) keep their spoken text —
+    fix_tts_sentence.py relies on this to match the existing audio.
     """
     if math_data:
         frame_key = str(frame_num)

@@ -321,6 +321,26 @@ chapter-title line; the orchestrator prepends those from the meta JSON when it \
 writes content_cleaned.txt.)"""
 
 
+# End matter we never teach from: everything from the first of these headings to
+# the end of the chapter (further reading, practice questions, further questions).
+_END_MATTER = re.compile(
+    r'^#{1,4}\s*(?:\d+\.\d+\s+)?'
+    r'(?:Further\s+Reading|Practice\s+Questions?|Further\s+Questions?|'
+    r'Questions?\s+and\s+Problems?|Problems?\s+and\s+Questions?)\b.*$',
+    re.MULTILINE | re.IGNORECASE)
+
+
+def drop_end_matter(md_text: str, verbose: bool = False) -> str:
+    """Cut a chapter at its end matter, keeping the Summary."""
+    m = _END_MATTER.search(md_text)
+    if not m:
+        return md_text
+    if verbose:
+        print(f"      dropped end matter from {m.group(0).strip()!r} "
+              f"({len(md_text) - m.start():,} chars)")
+    return md_text[:m.start()].rstrip() + "\n"
+
+
 def _light_markdown_preprocess(text: str) -> str:
     """Minimal cleanup that PRESERVES LaTeX/math (unlike preprocess_markdown).
 
@@ -339,30 +359,53 @@ def _light_markdown_preprocess(text: str) -> str:
 
 # Match a top-level section heading like "## 8.3 Velocity" (exactly N.M, not N.M.K)
 _SECTION_HEADING = re.compile(r'^#{1,4}\s+(\d+\.\d+)(?!\.\d)\b.*$', re.MULTILINE)
+_CHAPTER_HEADING = re.compile(r'^#\s+(?:Chapter\s+|Appendix\s+)?\d+[A-Za-z]?\b.*$',
+                              re.MULTILINE)
+# Any numbered heading, at any depth ("## 5.3", "### 5.3.6").
+_NUMBERED_HEADING = re.compile(r'^#{1,4}\s+(\d+(?:\.\d+)+)\b.*$', re.MULTILINE)
 
 
-def slice_sections(md_text: str, sections: list[str], verbose: bool = False) -> str:
+def slice_sections(md_text: str, sections: list[str], verbose: bool = False,
+                   exclude: list[str] | None = None) -> str:
     """Extract the requested top-level sections (and everything nested under them
     — subsections AND worked examples physically inside them) from chapter md.
 
     Boundaries are top-level "## N.M" headings; a requested section runs until the
     next top-level section heading (or chapter/EOF). This is robust to the messy
     sub-heading/example numbering because examples live *inside* a section's span.
+
+    `exclude` drops named SUBsections (e.g. "5.3.6") from the sliced output — for
+    a unit that takes most of a section but not all of it. An excluded subsection
+    runs from its own heading to the next heading at the same or a shallower
+    numbering depth, so unnumbered material inside it (Business Snapshots, tables,
+    examples) travels with it.
     """
-    # Index every top-level section heading: number -> (start, end_of_section).
+    # Index every numbered heading: number -> (start, end_of_section).
     # Skip table-of-contents entries (dotted leaders like "..... 12").
-    heads = [m for m in _SECTION_HEADING.finditer(md_text)
+    heads = [m for m in _NUMBERED_HEADING.finditer(md_text)
              if not re.search(r'\.{4,}\s*\d+\s*$', m.group(0))]
     if not heads:
         if verbose:
             print(f"      WARNING: no '## N.M' headings found; returning whole text")
         return md_text
+    # Chapter/appendix headings clamp a section's span. Without this the LAST requested
+    # section runs to EOF and swallows whatever follows the chapter proper — Ch14's
+    # "Chapter 14A Thermal Energy" appendix (7k words of thermodynamics, more than
+    # §14.5-14.9 itself) rode along into the Ch14b unit that way.
+    chapter_starts = [m.start() for m in _CHAPTER_HEADING.finditer(md_text)]
     spans: dict[str, tuple[int, int]] = {}
     for i, m in enumerate(heads):
         num = m.group(1)
         start = m.start()
-        end = heads[i + 1].start() if i + 1 < len(heads) else len(md_text)
-        # First occurrence wins (TOC pages may repeat a heading with no body).
+        # A section ends at the next heading of the SAME OR SHALLOWER numbering depth,
+        # so "5.3" still runs to "5.4" (unchanged) while "5.3.4" runs only to "5.3.5".
+        depth = num.count(".")
+        end = next((h.start() for h in heads[i + 1:] if h.group(1).count(".") <= depth),
+                   len(md_text))
+        following = [c for c in chapter_starts if start < c < end]
+        if following:
+            end = min(following)
+        # Longest span wins (TOC pages may repeat a heading with no body).
         if num not in spans or (end - start) > (spans[num][1] - spans[num][0]):
             spans[num] = (start, end)
 
@@ -381,7 +424,37 @@ def slice_sections(md_text: str, sections: list[str], verbose: bool = False) -> 
         )
     if verbose:
         print(f"      sliced sections {sections}: {sum(len(o) for o in out):,} chars")
-    return "\n\n".join(out)
+    sliced = "\n\n".join(out)
+    if exclude:
+        sliced = _drop_subsections(sliced, list(exclude), verbose)
+    return sliced
+
+
+
+def _drop_subsections(text: str, exclude: list[str], verbose: bool = False) -> str:
+    """Remove each named subsection's span from an already-sliced chunk."""
+    heads = list(_NUMBERED_HEADING.finditer(text))
+    cuts, missing = [], []
+    for sec in exclude:
+        m = next((h for h in heads if h.group(1) == sec), None)
+        if m is None:
+            missing.append(sec)
+            continue
+        depth = sec.count(".")
+        end = next((h.start() for h in heads
+                    if h.start() > m.start() and h.group(1).count(".") <= depth),
+                   len(text))
+        cuts.append((m.start(), end))
+    if missing:
+        raise ValueError(
+            f"excluded sections not found in sliced text: {missing} "
+            f"(available: {sorted({h.group(1) for h in heads})})"
+        )
+    for s_, e_ in sorted(cuts, reverse=True):
+        if verbose:
+            print(f"      excluded span: {e_ - s_:,} chars")
+        text = text[:s_] + text[e_:]
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -550,20 +623,35 @@ def _resolve_chapter_md(book_dir: Path, chapter: int) -> Path:
 
 
 def compose_unit_source(book_dir: Path, sources: list[dict], verbose=False) -> str:
-    """Concatenate the requested chapters/sections into one raw text blob."""
+    """Concatenate the requested chapters/sections into one raw text blob.
+
+    A source entry names its markdown either by chapter number (`"chapter": 5`
+    -> chapter05.md) or by explicit basename (`"file": "appendixC"` ->
+    appendixC.md), which is how non-numbered front/back matter such as Hull's
+    valuation appendices joins a unit.
+    """
     parts = []
     for src in sources:
-        ch = src["chapter"]
+        if "file" in src:
+            label = src["file"]
+            md_path = book_dir / f"{label}.md"
+            if not md_path.exists():
+                raise FileNotFoundError(f"source markdown not in {book_dir}: {label}.md")
+        else:
+            label = f"ch{src['chapter']}"
+            md_path = _resolve_chapter_md(book_dir, src["chapter"])
         sections = src.get("sections", "all")
-        md = _resolve_chapter_md(book_dir, ch).read_text(encoding="utf-8")
+        md = md_path.read_text(encoding="utf-8")
+        if src.get("drop_end_matter", True):
+            md = drop_end_matter(md, verbose)
         if sections in ("all", None, "*"):
             parts.append(md)
             if verbose:
-                print(f"      ch{ch}: whole chapter ({len(md):,} chars)")
+                print(f"      {label}: whole file ({len(md):,} chars)")
         else:
-            parts.append(slice_sections(md, list(sections), verbose))
+            parts.append(slice_sections(md, list(sections), verbose,
+                                        exclude=src.get("exclude")))
     return "\n\n".join(parts)
-
 
 def emit_prompt_for_unit(manifest: dict, book_dir: Path, args,
                          course_source: dict | None = None) -> None:

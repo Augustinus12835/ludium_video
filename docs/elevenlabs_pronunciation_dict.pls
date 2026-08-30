@@ -84,12 +84,28 @@
   <lexeme><grapheme>rho-dollar</grapheme><alias>roe-dollar</alias></lexeme>
   <lexeme><grapheme>rho-pound</grapheme><alias>roe-pound</alias></lexeme>
 
+  <!-- chi -> "kai" (added 2026-08-26). ElevenLabs otherwise reads "chi" as the "chee" of
+       cheese, which is wrong for every math/statistics use. In math/technical narration chi
+       only ever appears as the Greek letter, so the global alias is safe — see the override
+       note in the DELIBERATELY-NOT-ADDED block below. The hyphen-bound compounds need their
+       OWN rules: narration says "chi-squared", which the bare "chi" rule does not match
+       (same reason rho-dollar is listed separately). -->
+  <lexeme><grapheme>chi</grapheme><alias>kai</alias></lexeme>
+  <lexeme><grapheme>Chi</grapheme><alias>kai</alias></lexeme>
+  <lexeme><grapheme>chi-squared</grapheme><alias>kai-squared</alias></lexeme>
+  <lexeme><grapheme>Chi-squared</grapheme><alias>kai-squared</alias></lexeme>
+  <lexeme><grapheme>chi-square</grapheme><alias>kai-square</alias></lexeme>
+  <lexeme><grapheme>Chi-square</grapheme><alias>kai-square</alias></lexeme>
+
   <!-- DELIBERATELY NOT added here (collision risk — these are real English words/names/units,
        and the dict applies to ALL narration):
          psi  -> would clobber "psi" the pressure unit (say "P-S-I" in narration instead)
          xi   -> would clobber the name "Xi"
-         chi  -> would clobber "chi" (energy / Tai Chi)
          nu   -> would clobber "nu"; mu/tau/eta read acceptably as words
+       OVERRIDDEN 2026-08-26: chi WAS on this list (collision with "chi" the energy / Tai Chi)
+       but is now aliased globally to "kai" in section 3b — in math/technical narration chi
+       only ever appears as the Greek letter. If a script ever needs the "chee" sense, spell
+       it "chee" in that frame's narration rather than removing the rule.
        If one of these appears as a Greek letter and is mis-said, respell it in that frame's
        narration (e.g. "ksai", "sigh") rather than globally aliasing the word here. -->
 

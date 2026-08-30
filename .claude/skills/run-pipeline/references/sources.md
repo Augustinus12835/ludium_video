@@ -53,10 +53,15 @@ at `## ` headings into ~25k chunks, one subagent each, and concatenate. Run the 
 coverage gate, then proceed to segment.
 
 Multi-chapter units: a manifest JSON (`{"units": [{"unit", "title", "profile", "mode",
-"sources": [{"chapter", "sections"}]}]}`) composes sections across chapters —
-`clean_book_chapter.py --manifest <path> --book-dir inputs/book --unit <name>`. A
-`sections not found` error means the manifest lists a section the markdown doesn't have —
-fix the manifest and re-run; that's the intended validation gate.
+"sources": [{"chapter" | "file", "sections", "exclude"?, "drop_end_matter"?}]}]}`) composes
+sections across chapters — `clean_book_chapter.py --manifest <path> --book-dir inputs/book
+--unit <name>`. A source names its markdown by `chapter` number (`chapter05.md`) or by
+explicit `file` basename (`"appendixC"`); `sections` are top-level `N.M` numbers (`"all"`
+for the whole file); `exclude` drops named SUBsections (`"5.3.6"`) from the slice; end
+matter (Further Reading / Practice Questions …) is cut automatically unless
+`"drop_end_matter": false`. A `sections not found` error means the manifest lists a section
+the markdown doesn't have — fix the manifest and re-run; that's the intended validation
+gate.
 
 ## PPTX slide deck
 

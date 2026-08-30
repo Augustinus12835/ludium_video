@@ -241,6 +241,67 @@ def video_num_from_dir(video_dir: Path) -> int:
 
 
 # -----------------------------------------------------------------------------
+# Reference lecture notes (optional grounding for recorded lectures)
+# -----------------------------------------------------------------------------
+# Drop the lecturer's own notes / handout for the lecture, as Markdown, at
+# pipeline/<L>/source_lecture_notes.md BEFORE the clean step and they are
+# injected automatically into the clean and script prompts — no flag. An ASR
+# transcript of a chalkboard lecture never sees the board, so without them the
+# agents RECONSTRUCT the equations and worked examples, inventing values at
+# every ambiguity.
+
+REFERENCE_NOTES_FILENAME = "source_lecture_notes.md"
+
+REFERENCE_NOTES_CLEAN_BLOCK = """
+
+---
+
+OFFICIAL LECTURE NOTES FOR THIS LECTURE (the lecturer's own notes — GROUND TRUTH):
+
+{notes}
+
+---
+
+HOW TO USE THE OFFICIAL NOTES ABOVE. The transcript is machine speech-to-text of a
+chalkboard lecture: it never sees the board, so equations arrive spoken-only ("x squared
+over two") or garbled, numbers and symbols are mangled, and worked examples lose their
+exact values. The notes fix that:
+1. Reconstruct every definition, theorem statement, formula, derivation step and worked
+   example EXACTLY as the notes write it — values, signs, limits of integration, variable
+   names and notation. Write the math as LaTeX.
+2. Resolve any transcript ambiguity or self-contradiction in favour of the notes.
+3. Recover a formula or example the lecturer wrote on the board but never fully spoke.
+4. Do NOT import material the lecture does not teach: the notes may cover more (or a
+   different order) than this lecture — keep the lecturer's own order, examples and emphasis,
+   and add nothing from the notes that the lecture never reaches.
+5. If the lecture and the notes genuinely disagree on a value, keep the lecturer's value and
+   flag it with a bracketed note (e.g. "[notes give 3/2]").
+"""
+
+REFERENCE_NOTES_SCRIPT_BLOCK = """
+
+---
+
+OFFICIAL LECTURE NOTES (the lecturer's own notes for this lecture — GROUND TRUTH for
+notation, formulas and worked-example values). The SOURCE CONTENT above was cleaned against
+these notes; use them to (a) put formulas on screen in the notes' exact form and notation,
+(b) check every stated value, sign and limit before it is narrated, and (c) resolve any
+ambiguity in the source content. Do NOT add material beyond what the SOURCE CONTENT for
+this video covers — the notes may span more than this video.
+
+{notes}
+"""
+
+
+def load_reference_notes(pipeline_dir: Path) -> str:
+    """Return the staged reference notes for a lecture, or '' when none exist."""
+    path = Path(pipeline_dir) / REFERENCE_NOTES_FILENAME
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+# -----------------------------------------------------------------------------
 # Step handlers
 # -----------------------------------------------------------------------------
 
@@ -263,6 +324,15 @@ def step_clean(args: argparse.Namespace) -> None:
     if args.chunk_index >= len(chunks):
         raise SystemExit(f"chunk_index {args.chunk_index} out of range (have {len(chunks)})")
     user = CLEAN_PIPELINE_PROMPT.format(transcript=chunks[args.chunk_index])
+    # Reference notes, when staged: inserted between the transcript and the
+    # output cue so every chunk's cleaner sees the same ground truth.
+    ref = load_reference_notes(path.parent)
+    if ref:
+        block = REFERENCE_NOTES_CLEAN_BLOCK.format(notes=ref)
+        cue = "\n---\n\nEDUCATIONAL CONTENT:"
+        user = user.replace(cue, block + cue, 1) if cue in user else user + block
+        notes += (f" reference_notes={path.parent / REFERENCE_NOTES_FILENAME} injected "
+                  f"({len(ref.split()):,} words) — ground every equation/example in them.")
     emit(CLEAN_PIPELINE_SYSTEM, user, notes, pretty=args.pretty)
 
 
@@ -310,6 +380,10 @@ def step_script(args: argparse.Namespace) -> None:
         duration_hint=duration_hint,
         frame_count_hint=frame_count_hint,
     )
+    # Reference notes, when staged (see load_reference_notes above).
+    ref = load_reference_notes(pipeline_dir)
+    if ref:
+        user += REFERENCE_NOTES_SCRIPT_BLOCK.format(notes=ref)
 
     system = SCRIPT_SYSTEMS[mode]
     notes = (
@@ -319,6 +393,9 @@ def step_script(args: argparse.Namespace) -> None:
         f"python -c \"from scripts.utils.script_parser import load_script, save_script; "
         f"sd = load_script('{video_dir}'); save_script(sd, '{video_dir}', write_json=False, write_md=True)\""
     )
+    if ref:
+        notes += (f" reference_notes={pipeline_dir / REFERENCE_NOTES_FILENAME} injected "
+                  "(official notes — on-screen formulas must match their form).")
     emit(system, user, notes, pretty=args.pretty)
 
 
@@ -348,10 +425,15 @@ def step_verify_math(args: argparse.Namespace) -> None:
             f"{prior_context}\n"
         )
 
-    # The script declares each frame's class; a `visual` frame skips verification
-    # entirely (minimal {"frame_type": "visual"}), so surface that in the prompt
-    # rather than leaving it buried in `notes`. `frame_class` is not carried on the
-    # parsed Frame, so read it from the raw script.json.
+    # The script declares each frame's class, and the class decides the shape of the
+    # verification entry. A `visual` frame skips verification entirely (minimal
+    # {"frame_type": "visual"}); a `code` frame is NOT verified either, but it still
+    # needs a real entry — codegen only passes `code_steps` and selects the technical
+    # Code Block system prompt when frame_type == "code" (see step_manim below). A code
+    # frame written as {"frame_type": "visual"} therefore silently ships with the
+    # wrong layout. Surface both shapes in the prompt rather than leaving them buried
+    # in `notes`. `frame_class` is not carried on the parsed Frame, so read it from
+    # the raw script.json.
     frame_class = ""
     try:
         _raw = json.loads((video_dir / "script.json").read_text())
@@ -361,12 +443,33 @@ def step_verify_math(args: argparse.Namespace) -> None:
                 break
     except (OSError, ValueError):
         pass
-    if frame_class and frame_class != "math":
+    if frame_class == "code":
+        narration = (
+            "NOTE: script.json declares this frame's frame_class as \"code\". A code frame "
+            "is NOT verified — it gets no math_steps and no final_answer — but it DOES need "
+            "a full entry, not the minimal visual one. "
+            "Emit exactly:\n"
+            '  {"frame_type": "code",\n'
+            '   "code_steps": [{"step": 1, "expression": "<one source line, verbatim>", '
+            '"operation": "<what it does / how to reveal it>", '
+            '"note": "<optional provenance, e.g. source file + line>", '
+            '"highlight_when": "<optional verbatim phrase from the narration below>"}, ...],\n'
+            '   "original_narration": "<the narration below, copied VERBATIM>"}\n'
+            "and stop. Three requirements, each of which breaks the frame silently if missed: "
+            "(1) frame_type MUST be \"code\" — codegen only passes code_steps and only selects "
+            "the Code Block layout for \"code\"; (2) the step key is \"operation\", NOT "
+            "\"description\"; (3) original_narration is REQUIRED — without it the codegen "
+            "prompt's NARRATION block is EMPTY. Each highlight_when must occur exactly once in "
+            "the narration. Only override this if the narration below genuinely works a "
+            "calculation.\n\n"
+            f"{narration}"
+        )
+    elif frame_class and frame_class != "math":
         narration = (
             f"NOTE: script.json declares this frame's frame_class as \"{frame_class}\", "
-            f"NOT \"math\". A non-math frame is NOT verified and gets no math_steps and no "
-            f"natural_narration — emit exactly {{\"frame_type\": \"visual\"}} for it and stop. "
-            f"Only override this if the narration below genuinely works a calculation.\n\n"
+            f"NOT \"math\". A non-math, non-code frame is NOT verified and gets no math_steps "
+            f"— emit exactly {{\"frame_type\": \"visual\"}} for it and "
+            f"stop. Only override this if the narration below genuinely works a calculation.\n\n"
             f"{narration}"
         )
 
@@ -385,12 +488,22 @@ def step_verify_math(args: argparse.Namespace) -> None:
         f"{video_dir}/math_verification.json, whose shape is: top level "
         '{"success": true, "video_title": str, "requires_math": true, "frames": {...}} ; '
         'a math frame is {"frame_type": "math", "math_steps": [...], "final_answer": str, '
-        '"natural_narration": <TTS-safe spoken text>, "math_context": str, '
+        '"math_context": str, '
         '"verification_status": "correct"|"corrected", "issues_found": [...], '
-        '"confidence": str} ; a visual frame is the minimal {"frame_type": "visual"}. '
-        "NOTE generate_tts_elevenlabs.py speaks `natural_narration` for any math frame whose "
-        "verification_status is correct/corrected — so that field, not script.json, is what "
-        "the viewer hears. Once ALL frames are verified, run the "
+        '"confidence": str} ; a CODE frame is {"frame_type": "code", "code_steps": '
+        '[{"step": int, "expression": <one source line verbatim>, "operation": str, '
+        '"note": str (optional), "highlight_when": str (optional, verbatim from the '
+        'narration, occurring exactly once)}], "original_narration": <the script narration, '
+        'VERBATIM>} — frame_type must be "code" (codegen gates code_steps and the Code Block '
+        'layout on it), the step key is "operation" not "description", and '
+        'original_narration is required or the codegen NARRATION block is empty ; '
+        'a visual frame is the minimal {"frame_type": "visual"}. '
+        "SPOKEN TEXT: do NOT write a `natural_narration` field (retired 2026-08-30). TTS, "
+        "subtitles and codegen read script.json's narration VERBATIM for every frame class; "
+        "it is already TTS-safe and reviewed. If the verification changes what must be SAID "
+        "(a wrong value), fix script.json frames[N].narration itself — a spoken-text edit "
+        "belongs to the scripting model (route it like a review fix) — and record the "
+        "wrong→right in issues_found. Once ALL frames are verified, run the "
         "`color_plan` step to add the video-wide semantic color plan (top-level key)."
     )
     emit(VERIFY_MATH_SYSTEM, user, notes, pretty=args.pretty)
@@ -436,6 +549,9 @@ def step_sympy_gen(args: argparse.Namespace) -> None:
 
     math_steps = entry.get("math_steps", [])
     narration = entry.get("natural_narration") or entry.get("original_narration", "")
+    if not narration:
+        script_frame = load_script(video_dir).get_frame(args.frame)
+        narration = script_frame.narration if script_frame else ""
 
     steps_text = ""
     for step in math_steps:
@@ -502,19 +618,22 @@ def step_manim(args: argparse.Namespace) -> None:
     frame_info = mv.get("frames", {}).get(str(frame_num), {})
 
     frame_type = frame_info.get("frame_type", "math")
+    math_steps = frame_info.get("math_steps", [])
+    script_frame = script_data.get_frame(frame_num)
+
+    # Spoken text, in the precedence TTS uses (generate_tts_elevenlabs.get_natural_narration):
+    # a LEGACY `natural_narration` (pre-2026-08-30 files only) > a code frame's verbatim
+    # `original_narration` > script.json narration — the norm for EVERY frame class now
+    # that the verify_math rewrite is retired. Previously a math frame with neither field
+    # shipped an EMPTY narration block (plus a word transcript matching nothing).
     narration = (
         frame_info.get("natural_narration")
         or frame_info.get("original_narration")
-        or ""
+        or (script_frame.narration if script_frame else "")
     )
-    math_steps = frame_info.get("math_steps", [])
-
-    script_frame = script_data.get_frame(frame_num)
     visual_desc = frame_info.get("original_narration", narration)
     if script_frame and script_frame.visual and script_frame.visual.reference:
         visual_desc = script_frame.visual.reference
-    if frame_type == "visual" and not frame_info.get("natural_narration") and script_frame:
-        narration = script_frame.narration
 
     # Duration: auto-derive from audio when --duration omitted.
     if args.duration is not None:

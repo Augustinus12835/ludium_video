@@ -39,8 +39,7 @@ trim content. Dense worked-example and physics frames hit this most.
 `✗ TTS narration check failed` names each frame, its spoken source, and offending tokens by
 category. The gate only detects — false positives are expected and land here for triage.
 The canonical category list and conversions live in `scripts/utils/narration_check.py` and
-the prompt rules (`scripts/utils/tts_rules.py`, `scripts/utils/verify_prompts.py`
-VERIFY_MATH_SYSTEM). Summary:
+the prompt rules (`scripts/utils/tts_rules.py`). Summary:
 
 | Category | Convert to |
 |---|---|
@@ -48,7 +47,7 @@ VERIFY_MATH_SYSTEM). Summary:
 | `greek` / `math_symbol` | the name ("alpha", "square root of", "times", "degrees") |
 | `hex` / `opaque` | spaced characters ("0 x D E A D…") |
 | `differential` | spaced ("d x") |
-| `acronym` | spaced letters ("U T X O"; allowlisted ones aren't flagged) |
+| `acronym` | spaced letters ("U T X O"; allowlisted ones aren't flagged). Includes mixed-case initialisms, where a lowercase letter inside the token does NOT make it a word — "VaR" is voiced "var", so write "value at risk"; also "CVaR", "DoS" — and plural/possessive forms ("UTXOs" → "U T X Os"). |
 | `code_token` | spoken prose ("my func", "is equal to") |
 | `variable_a` | uppercase the variable: "A-one", "A times t", "slope A" (lowercase `a` reads as the article; only `a` collides) |
 | `sentence_a` | rephrase so "A" isn't the first word ("Matrix A times…") |
@@ -58,8 +57,9 @@ Preferred notation forms (correct, never flagged): `Ax`→"A-X", `A_x`→"A-X",
 hyphen-bound with NO spoken "sub" (2026-08-25) — legacy "A-sub-X" narration is not
 wrong, just verbose; don't rewrite an already-voiced video for it.
 
-Fix the source the report names — `natural_narration` in `math_verification.json` for math
-frames, `script.json` narration for visual frames (both when unsure). On-screen text keeps
+Fix the source the report names — `script.json` narration for every frame class (only a
+LEGACY pre-2026-08-30 video names `natural_narration` in `math_verification.json`; fix both
+there when unsure). On-screen text keeps
 its normal form; only spoken text changes. The gate fires in Stage 2 (the producer runs
 tts): mechanical token conversions (the table above) may be applied directly; anything that
 genuinely rephrases a sentence (`sentence_a`, pacing rewording) is spoken-text authoring —

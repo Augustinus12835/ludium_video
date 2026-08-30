@@ -3,10 +3,10 @@ Canonical TTS narration rules for script-generation prompts.
 
 ElevenLabs reliably mangles certain token shapes (raw numerals, initialisms,
 hex strings, code syntax). These rule blocks are injected verbatim into the
-math/technical script-generation prompts in generate_scripts.py; the
-math-frame equivalent lives in ClaudeClient.VERIFY_MATH_SYSTEM /
-VERIFY_CODE_SYSTEM (scripts/utils/verify_prompts.py), and the post-hoc
-detection gate is scripts/utils/narration_check.py.
+math/technical script-generation prompts in generate_scripts.py — they are the
+ONLY place spoken text is shaped: every frame class's narration is voiced
+verbatim from script.json (the verify_math `natural_narration` TTS rewrite was
+retired 2026-08-30). The post-hoc detection gate is scripts/utils/narration_check.py.
 
 When hardening a NEW recurring mispronunciation, update the relevant layer
 here AND the narration_check.py detector so prompts and the gate stay in sync.
@@ -33,6 +33,23 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      number. The rule of thumb: **if you would pronounce it letter-by-letter when
      speaking aloud, write it with spaces in the `narration` field.** If it's
      pronounced as a word, leave it alone.
+
+     **Mixed-case initialisms are the trap** — a lowercase letter inside the token
+     does NOT make it a word. `VaR` is voiced as "var" (rhyming with "car"), never
+     "V A R". Prefer the spelled-out phrase over the letters wherever the phrase is
+     what a lecturer would actually say:
+
+     | Original | Narration |
+     |----------|-----------|
+     | `VaR` | `value at risk` (preferred) or `V A R` |
+     | `CVaR` | `conditional value at risk` |
+     | `ES` | `expected shortfall` (preferred) or `E S` |
+     | `EWMA` | `E W M A` |
+     | `GARCH(1,1)` | `Garch one one` |
+     | `DoS` | `D o S` / `denial of service` |
+
+     A plural or possessive keeps the spacing and appends the suffix:
+     `UTXOs` → `U T X Os`, `VaRs` → `value at risk numbers`, `IDs` → `I Ds`.
 
      **Spell letter-by-letter** (write with single spaces between letters):
 
@@ -271,13 +288,12 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      blocks with the actual code, indentation, and punctuation preserved verbatim."""
 
 # Injected into MATH_SCRIPT_GENERATION_PROMPT (spoken `narration` field rules
-# for math videos). Math frames get a TTS rewrite during verification
-# (ClaudeClient.VERIFY_MATH_SYSTEM), but frames declared `frame_class: "visual"`
-# skip verification — their narration is spoken EXACTLY as written, so it must
-# already be TTS-safe. The rules apply to every frame's narration; the pre-TTS
-# gate (narration_check.py) halts the pipeline on violations.
-MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — especially for "frame_class": "visual" frames,
-     whose narration is spoken exactly as written with no rewrite pass):**
+# for math videos). EVERY frame's narration — math, visual, code — is spoken
+# EXACTLY as written (verify_math checks the math and extracts steps; it does
+# not touch spoken text), so it must already be TTS-safe. The pre-TTS gate
+# (narration_check.py) halts the pipeline on violations.
+MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every frame's narration, math and visual
+     alike, is spoken exactly as written; there is NO downstream rewrite pass):**
        - **Numbers — ZERO digits 0-9 in the narration field.** Spell every number out
          in English words: `3.14` → "three point one four", `1/137` → "one over one
          hundred thirty-seven", `12x^3` → "twelve x cubed". Match the value the slide
@@ -294,7 +310,17 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — especially
          to", `≠` → "not equal to", `×` → "times", `±` → "plus or minus", `∞` →
          "infinity", `°` → "degrees". No raw math symbols in the narration.
        - **Differentials — space the letters:** "d x", "d u", "d y over d x" — never
-         "dx", "du", "dy/dx" (TTS reads "dx" as a word, not two letters).
+         "dx", "du", "dy/dx" (TTS reads "dx" as a word, not two letters; "du" reads
+         as the verb "do"). Partials: write "partial" for ∂ — "partial f over
+         partial x". Second derivatives: "d squared y over d x squared".
+       - **Hyperbolic functions — write the phonetic form:** TTS treats the trailing
+         "h" as silent and reads them like the trig functions. "sinch" for sinh,
+         "tanch" for tanh, "koth" for coth, "sheck" for sech, "co-sheck" for csch;
+         "cosh" reads correctly as written. Inverses: "arc sinch", "arc tanch".
+       - **Initialisms — space the letters** if you would say them letter-by-letter:
+         `ODE` → "O D E", `IVP` → "I V P", `PDE` → "P D E", `RHS` → "R H S". Leave
+         ones pronounced as words alone. Years spoken aloud follow the number rule:
+         `1687` → "sixteen eighty-seven".
        - **Single-letter variables — UPPERCASE** so TTS reads the letter name, not an
          article: "the function F of X", "solve for X". **Critical for a standalone
          variable `a` in flowing prose** — when the acceleration / leading-coefficient /

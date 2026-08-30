@@ -11,8 +11,9 @@ word's timing are unchanged — no re-timing, no Manim re-render, just recompile
 
 Workflow:
   1. Edit the spoken source to fix the text:
-       - math frames  -> natural_narration in math_verification.json
-       - visual frames -> narration in script.json
+       - every frame  -> narration in script.json (the norm since 2026-08-30)
+       - LEGACY math frames that still carry a verified natural_narration in
+         math_verification.json -> edit it THERE (that is what the audio was voiced from)
      (This tool reads the SAME source generate_tts_elevenlabs.get_natural_narration() reads.)
   2. python scripts/fix_tts_sentence.py pipeline/<L>/Video-N [--frame F ...] [--dry-run]
      Omit --frame to auto-process every frame whose source text now differs from its audio.

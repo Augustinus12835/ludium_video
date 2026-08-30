@@ -301,12 +301,13 @@ REQUIREMENTS:
        line-by-line (put the actual code in a fenced ```python block in the visual)
      - "visual": everything else — processes, structures, networks, diagrams,
        timelines, conceptual explanations
-       NOTE: a "visual" frame's narration is spoken EXACTLY as you write it (math/code
-       frames get a later TTS-safety rewrite; visual frames do NOT). So a "visual"
-       frame's narration must already obey every TTS rule below, and any number or
-       result it states aloud must be correct — nothing downstream checks it. If a
-       frame states calculations or quantities it should be "math" (or "code"), not
-       "visual", so it gets the verification + rewrite pass.
+       NOTE: EVERY frame's narration is spoken EXACTLY as you write it — there is no
+       downstream TTS rewrite for any class (verify_math checks the math of "math"
+       frames and extracts their on-screen steps; it never touches spoken text). So
+       all narration must already obey every TTS rule below. A "visual" frame's
+       numbers and results are not checked by anything downstream — if a frame
+       states calculations or quantities it should be "math" (or "code"), not
+       "visual", so its values get the SymPy verification pass.
 
    **For math/calculation frames**, use a Layout prefix:
    - **Layout A** (Full Whiteboard): Pure derivation or step-by-step procedure.

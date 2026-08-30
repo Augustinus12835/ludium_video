@@ -56,9 +56,9 @@ counts, values, and claims match; nothing important spoken but unshown, or shown
 spoken); `metadata.frame_count == len(frames)`, frame numbers gapless; pedagogy
 (prerequisite-first order, a real hook and synthesis); TTS-safety of spoken text (pre-empt
 the `narration_check.py` gate — no raw numerals/Greek/symbols/differentials/bare acronyms in
-narration). The reviewer runs SymPy itself on each calculation; `frame_class` is right (a
-`visual` frame skips the verify_math TTS rewrite, so its narration must already be
-TTS-safe); displayed code/results match the narration.
+narration). The reviewer runs SymPy itself on each calculation; `frame_class` is right;
+every frame's narration is spoken verbatim (there is no downstream rewrite for any class),
+so it must already be TTS-safe; displayed code/results match the narration.
 
 **Source-error detection**: when a calculation or claim is wrong, decide whether the error
 originates in the source (wrong in `content.txt` too) or is a script slip. Fix the script
@@ -81,19 +81,20 @@ reason through the math, and run SymPy yourself (temp `.py` via `venv/bin/python
 confirm each step and the final answer. Maintain a running `math_context` across frames.
 Write `Video-N/math_verification.json` in the schema the prompt's `notes` field specifies:
 top-level `{"success": true, "video_title": …, "requires_math": true, "frames": {…}}`; math
-frames `{"frame_type":"math","math_steps":[…],"final_answer":…,"natural_narration":
-<TTS-safe spoken text>,"math_context":…}`; visual frames a minimal
-`{"frame_type":"visual"}`. Your own SymPy execution is the verification — there is no
-separate SymPy gate.
+frames `{"frame_type":"math","math_steps":[…],"final_answer":…,"math_context":…}`; code
+frames (technical) `{"frame_type":"code","code_steps":[…],"original_narration":<script
+narration verbatim>}`; visual frames a minimal `{"frame_type":"visual"}`. Your own SymPy
+execution is the verification — there is no separate SymPy gate.
 
-**`natural_narration` is spoken text → the scripting model.** Verify the math yourself
-(SymPy, `math_steps`, `final_answer`, `math_context`), leaving `natural_narration` unset.
-Then spawn ONE nested subagent (same capable model as Stage 1) for the video with every math
-frame's verified steps, the script narration, and the prompt's TTS rules; it writes each
-math frame's `natural_narration` (TTS-safe spoken text — this is what ElevenLabs reads
-verbatim for math frames). This is a one-shot downstream rewrite — tell it plainly it has no
-channel to peers and must put everything actionable in its final report. Merge its output
-into `math_verification.json` before step 2b / tts.
+**No spoken-text output from this step.** Do NOT write `natural_narration` (retired
+2026-08-30 — it fixed nothing the TTS gate detects and silently mutated ~22% of verified
+frames, breaking cue anchors). TTS, subtitles and codegen all read `script.json`'s
+narration verbatim for every frame class. If SymPy shows a spoken value is WRONG, the fix is
+a script fix: route the exact wrong→right wording to a one-shot subagent on the scripting
+model that edits `script.json frames[N].narration` (keeping every `On "…"` cue phrase in
+`visual.reference` verbatim), record it in `issues_found`, and flag it in your report.
+Deliberate source rounding is not an error — `math_steps` show the value the narration
+speaks.
 
 ### 2b. color plan (after all frames are verified)
 

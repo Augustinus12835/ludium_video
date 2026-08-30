@@ -1,9 +1,9 @@
 """
 Pre-TTS guard: detect text that ElevenLabs will mispronounce in spoken narration.
 
-The scripting prompts (generate_scripts.py, verify_prompts.py) tell Claude to convert anything
-TTS can't read naturally into spoken English BEFORE it reaches the narration field. The model
-sometimes forgets. This guard re-checks the spoken text and, if it finds an un-converted token,
+The scripting prompts (generate_scripts.py via scripts/utils/tts_rules.py) tell Claude to
+convert anything TTS can't read naturally into spoken English BEFORE it reaches the narration
+field. The model sometimes forgets. This guard re-checks the spoken text and, if it finds an un-converted token,
 halts the pipeline BEFORE the TTS step and surfaces the offenders the same way SymPy failures
 are — so /run-pipeline can triage (fix the source, or bypass a false alarm with
 SKIP_NARRATION_CHECK=1).
@@ -18,14 +18,17 @@ It DETECTS only — it never rewrites text. False positives are expected and fin
   opaque        long letter+digit blobs     -> spaced chars (hashes / addresses / txids)
   differential  dx du dy …                  -> spaced ("d x", "d u")  [the "du"->"do" failure]
   acronym       UTXO ECDSA SHA …            -> spaced letters ("U T X O")  [allowlist read-as-words]
+                also mixed-case ("VaR" -> "value at risk", "CVaR", "DoS") and suffixed
+                ("UTXOs" -> "U T X O s") initialisms, which the all-caps run misses
   code_token    snake_case / -> / == …      -> spoken prose ("my func", "returns", "is equal to")
   variable_a    "a one"/"a-two" (var a_1), or a bare variable a ("a times t", "a of t",
                 "a-t", "slope a.")          -> uppercase the variable ("A-one"; "A times t", "A of t", "A-t")
   sentence_a    sentence-initial "A" / "A-hat" / "A-X"  -> lead with the noun ("Matrix A times …")  [read as "uh"; hyphen doesn't rescue it]
 
 Spoken source per frame mirrors generate_tts_elevenlabs.get_natural_narration():
-  - math frame with a verified natural_narration -> math_verification.json natural_narration
-  - otherwise                                    -> script.json frames[N].narration
+  - script.json frames[N].narration for every frame class (the norm since 2026-08-30 —
+    verify_math no longer writes a `natural_narration` rewrite)
+  - LEGACY files only: a math frame carrying a verified natural_narration -> that field
 """
 
 import json
@@ -56,11 +59,30 @@ _DIFFERENTIAL = re.compile(r"\bd[xyuvwtrsz]\b")
 
 # Initialisms: 2+ capitals in a row. Allowlist below holds the ones TTS reads fine as words.
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
+
+# Two initialism shapes the all-caps regex above cannot see, because a lowercase letter
+# breaks the \b[A-Z]{2,}\b run. Both are read as a WORD by ElevenLabs, not as letters:
+#
+#   (a) internal-lowercase initialisms — "VaR" -> "var" (rhymes with car), "CVaR", "DoS".
+#       Signature: starts uppercase, 2+ capitals, and every lowercase run is a SINGLE letter.
+#       That single-letter rule is what separates them from ordinary CamelCase compounds
+#       ("SegWit", "PageRank", "MuSig", "SymPy", "NoneType"), whose lowercase runs are 2+.
+#   (b) initialism + lowercase suffix — "UTXOs", "IDs", "CLTVs", "ODEs", "LIBORs".
+#
+# Both calibrated over a 14,266-frame production corpus: shape (a) matched only DoS/WiFi,
+# shape (b) only genuine plural initialisms — no false positives once the read-as-word
+# allowlist below is applied to the stem.
+_MIXED_ACRONYM = re.compile(
+    r"\b(?=[A-Za-z]{2,8}\b)(?=[A-Za-z]*[a-z])(?![A-Za-z]*[a-z]{2})[A-Z][A-Za-z]*[A-Z][A-Za-z]*\b")
+_SUFFIXED_ACRONYM = re.compile(r"\b([A-Z]{2,})(?:s|es|'s)\b")
+
 _ACRONYM_OK = {
     "JSON", "REST", "CRUD", "SQL", "ASIC", "RAID", "LASER", "RADAR", "SCUBA", "NATO",
     "EBITDA", "EBIT", "COGS", "SAAS", "PAAS", "MAST", "HODL", "GAAP", "TARP",
     "ALL", "NONE", "SINGLE", "TRUE", "FALSE", "VERIFY", "IF", "ELSE", "AND", "OR", "NOT",
     "ANYONECANPAY", "OK",
+    # read-as-word mixed-case tokens (calibrated false positives of _MIXED_ACRONYM)
+    "WIFI", "LATEX",
 }
 
 # Code leakage: tokens with an underscore (snake_case / dunder) and multi-char ASCII operators.
@@ -176,7 +198,15 @@ def _bare_variable_a(text):
 
 
 def _acronyms(text):
-    return [t for t in _ACRONYM.findall(text) if t.upper() not in _ACRONYM_OK]
+    out = [t for t in _ACRONYM.findall(text) if t.upper() not in _ACRONYM_OK]
+    # allowlist check uses both the token and its stem, so an allowlisted read-as-word
+    # initialism stays clean in its plural form too ("ASIC" -> "ASICs").
+    out += [t for t in _MIXED_ACRONYM.findall(text)
+            if t.upper() not in _ACRONYM_OK
+            and t.rstrip("abcdefghijklmnopqrstuvwxyz").upper() not in _ACRONYM_OK]
+    out += [m.group(0) for m in _SUFFIXED_ACRONYM.finditer(text)
+            if m.group(1).upper() not in _ACRONYM_OK]
+    return out
 
 
 # (category, finder) — each finder returns a list of offending substrings.
@@ -275,7 +305,7 @@ def format_report(offenders, video_dir) -> str:
     lines.append("  'A-one'; bare 'a times t'/'a of t'/'slope a' -> 'A times t'/'A of t'/'slope A'),")
     lines.append("  or a sentence starting with the name 'A' (read as the article")
     lines.append("  'uh' — lead with the noun: 'Matrix A times ...'). Convert each in the spoken source")
-    lines.append("  (natural_narration for math frames, script.json narration for visual frames);")
+    lines.append("  (script.json narration for every frame; a LEGACY math frame's natural_narration if present);")
     lines.append("  on-screen text keeps its normal form. Genuine false positive? Resume with")
     lines.append("  SKIP_NARRATION_CHECK=1 to bypass.")
     return "\n".join(lines)

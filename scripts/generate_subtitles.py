@@ -14,8 +14,9 @@ Fallback path (legacy videos without timestamp files): transcribe
 final_video.mp4 with ElevenLabs Scribe, then align script text (ground truth)
 to those timestamps using sequence matching.
 
-For math videos, uses natural_narration from math_verification.json
-to ensure subtitles match TTS audio (e.g., "square root of x" not "sqrt(x)").
+Spoken text = script.json narration for every frame class; a LEGACY (pre-2026-08-30)
+math frame's natural_narration in math_verification.json is still honoured so the
+subtitles match the audio that was actually voiced.
 
 Usage:
     python generate_subtitles.py pipeline/LECTURE

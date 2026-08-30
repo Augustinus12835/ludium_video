@@ -12,8 +12,9 @@ run the pipeline, fix failures, audit frames. The user invokes this to walk away
 **The architectural rule: every LLM call is a subagent, never an LLM API** — clean, segment,
 script, math verification + color plan, and frame codegen. **Model routing: one scripting
 agent owns everything that decides what is SAID and what is SHOWN** — the script step
-(narration PLUS each frame's `visual` description), script fixes coming out of review, and
-the `natural_narration` TTS text written during verify_math. Use your most capable available
+(narration PLUS each frame's `visual` description) and script fixes coming out of review or
+verify_math (spoken text is `script.json` for every frame class — the verify_math
+`natural_narration` rewrite was retired 2026-08-30). Use your most capable available
 model for that scripting stage. **The producer agent does everything else** — SymPy
 verification, color plan, frame codegen, renders, and QA/audit (including applying QA-driven
 fixes). One author for spoken + shown means the two tracks can't disagree about what's
@@ -82,6 +83,11 @@ and PPTX sources arrive with `content_cleaned.txt` — start at segment.
    ```bash
    venv/bin/python scripts/pipeline.py run "<URL-or-folder>" --from transcribe --to transcribe --no-review [mode]
    ```
+   With a YouTube URL whose title makes a poor folder name, add `--folder <Name>`. If the
+   lecturer's official notes/handout exist, save them as Markdown at
+   `pipeline/<L>/source_lecture_notes.md` NOW — `render_step_prompt.py clean|script` inject
+   them automatically as ground truth for every equation and worked example (an ASR
+   transcript never sees the board).
 2. **clean** (subagents, one per chunk, in parallel) — render each chunk's exact prompt:
    ```bash
    # chunk count:

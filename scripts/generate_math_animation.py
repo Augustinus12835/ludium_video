@@ -883,8 +883,8 @@ def main():
         sys.exit(1)
 
     # Detect math/technical course
-    MATH_PREFIXES = ("Calculus_", "Linear_Algebra_", "Statistics_",
-                     "Probability_", "Differential_Equations_")
+    MATH_PREFIXES = ("Calculus_", "Single_Variable_Calculus_", "Multivariable_Calculus_",
+                     "Linear_Algebra_", "Statistics_", "Probability_", "Differential_Equations_")
     lecture_name = Path(video_folder).parent.name
     is_math_course = args.math or any(lecture_name.startswith(p) for p in MATH_PREFIXES)
     is_technical = args.technical and not is_math_course

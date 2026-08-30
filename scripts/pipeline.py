@@ -550,6 +550,8 @@ def count_videos_in_segments(segments_path: Path) -> int:
 # Lecture name prefixes that always require math verification
 MATH_COURSE_PREFIXES = (
     "Calculus_",
+    "Single_Variable_Calculus_",
+    "Multivariable_Calculus_",
     "Linear_Algebra_",
     "Statistics_",
     "Probability_",
@@ -970,13 +972,16 @@ def find_source_video(lecture_dir: Path) -> Optional[Path]:
 def run_full_pipeline(lecture_id: str, review_mode: bool = True,
                       from_step: str = None, only_video: int = None,
                       technical: bool = False, math: bool = False,
-                      to_step: str = None):
+                      to_step: str = None, folder: str = None):
     """
     Run the full pipeline for a lecture.
 
     lecture_id can be:
     - A lecture name (e.g., "MY_LECTURE") - looks for inputs/MY_LECTURE.mp4
     - A YouTube URL (e.g., "https://www.youtube.com/watch?v=xxx") - fetches transcript
+      `folder` (--folder) names the pipeline folder explicitly instead of deriving it
+      from the video title — for titles whose sanitized form is meaningless
+      (e.g. "Lec 1 | MIT 18.01 ...").
 
     1. Run week-level steps (transcribe, clean, segment)
     2. Checkpoint: Review segmentation
@@ -994,13 +999,19 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
         # Get video title to create lecture ID
         print(f"Fetching video info from YouTube...")
         video_title = get_youtube_video_title(youtube_video_id)
-        if video_title:
+        if folder:
+            lecture_id = folder.strip("/").split("/")[-1]
+            print(f"  Title: {video_title or '(unavailable)'}")
+            print(f"  Lecture ID (--folder): {lecture_id}")
+        elif video_title:
             lecture_id = sanitize_lecture_id(video_title)
             print(f"  Title: {video_title}")
             print(f"  Lecture ID: {lecture_id}")
         else:
             lecture_id = f"YouTube_{youtube_video_id}"
             print(f"  Could not fetch title, using: {lecture_id}")
+    elif folder and folder.strip("/").split("/")[-1] != lecture_id.rstrip("/").split("/")[-1]:
+        print(f"{Colors.YELLOW}--folder is only used with a YouTube URL; ignoring '{folder}'{Colors.RESET}")
 
     # Strip "pipeline/" prefix if user passed the full path
     prefix = str(PIPELINE_ROOT) + "/"
@@ -1454,6 +1465,9 @@ Review Checkpoints:
     run_parser = subparsers.add_parser("run", help="Run full pipeline for a lecture")
     run_parser.add_argument("lecture_id", help="Lecture ID (e.g., YOUR_LECTURE)")
     run_parser.add_argument("--video", type=int, help="Only process specific video number")
+    run_parser.add_argument("--folder", default=None,
+                            help="With a YouTube URL: name the pipeline folder explicitly "
+                                 "(e.g. Single_Variable_Calculus_L01_...) instead of deriving it from the title")
     run_parser.add_argument("--from", dest="from_step", help="Force start from step")
     run_parser.add_argument("--to", dest="to_step", default=None,
                             help="Stop after this step (inclusive). e.g. --to tts hands off "
@@ -1505,6 +1519,7 @@ Review Checkpoints:
             technical=args.technical,
             math=args.math,
             to_step=to_step,
+            folder=getattr(args, 'folder', None),
         )
 
     elif args.command == "video":
