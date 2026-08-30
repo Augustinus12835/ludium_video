@@ -44,7 +44,11 @@ There are two kinds of steps, and they run on different engines:
 
 The only paid external service is **ElevenLabs**, used for both text-to-speech
 and Scribe speech-to-text. TTS returns exact word timestamps, which is what lets
-animations and subtitles sync to the narration at word precision.
+animations and subtitles sync to the narration at word precision. Narration is
+written TTS-safe (numbers and symbols spelled out in words), so subtitles are
+compacted back to written form for display — 1973, 30,000, 6.02 × 10²³, ΔX,
+dy/dx, λ₁, ≤ — with timestamps preserved (`scripts/utils/subtitle_compact.py`;
+`--no-compact` opts out).
 
 ## Getting started
 

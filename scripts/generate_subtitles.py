@@ -23,12 +23,17 @@ Usage:
     python generate_subtitles.py pipeline/LECTURE --video 3
     python generate_subtitles.py pipeline/LECTURE --force
 
+Subtitle text is compacted from spoken form back to written form by default
+(spelled-out numbers -> Arabic numerals, spoken math -> Unicode symbols; see
+scripts/utils/subtitle_compact.py). --no-compact keeps the verbatim words.
+
 Output:
     - Video-N/subtitles.srt (separate subtitle file for each video)
 """
 
 import os
 import sys
+import glob
 import json
 import argparse
 import difflib
@@ -40,6 +45,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.utils.script_parser import load_script
+from scripts.utils.subtitle_compact import compact_words, compact_stats
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
@@ -414,9 +420,15 @@ def generate_srt(aligned_words: List[Dict], output_path: str,
     return len(subtitle_entries)
 
 
-def generate_subtitles_for_video(video_folder: str, force: bool = False) -> Tuple[bool, str]:
+def generate_subtitles_for_video(video_folder: str, force: bool = False,
+                                 compact: bool = True) -> Tuple[bool, str]:
     """
     Generate subtitles for a single video folder by transcribing final_video.mp4.
+
+    compact=True (default) converts spoken forms back to compact written form
+    (spelled-out numbers -> Arabic numerals, spoken math -> Unicode symbols)
+    via scripts/utils/subtitle_compact.py; timing is preserved. Math-notation
+    rules auto-enable when the video has Manim frames.
 
     Returns (success, message)
     """
@@ -477,6 +489,16 @@ def generate_subtitles_for_video(video_folder: str, force: bool = False) -> Tupl
             match_pct = match_count / len(aligned_words) * 100 if aligned_words else 0
             print(f"      Alignment: {len(aligned_words)} words placed, ~{match_pct:.0f}% direct matches")
 
+        # Step 2.5: compact spoken forms back to written form (timestamps kept)
+        if compact:
+            math_mode = bool(glob.glob(
+                os.path.join(video_folder, 'frames', 'frame_*_manim.py')))
+            before = aligned_words
+            aligned_words = compact_words(aligned_words, math_mode=math_mode)
+            print(f"      Compacted spoken forms "
+                  f"({'math' if math_mode else 'standard'} rules): "
+                  f"{compact_stats(before, aligned_words)}")
+
         # Step 3: Generate SRT
         print("\n[3/3] Generating subtitles.srt...")
         num_subtitles = generate_srt(aligned_words, subtitle_path)
@@ -515,6 +537,8 @@ def main():
     parser.add_argument('lecture_folder', help='Path to lecture folder (e.g., pipeline/LECTURE)')
     parser.add_argument('--video', type=int, help='Generate for specific video number only')
     parser.add_argument('--force', action='store_true', help='Regenerate even if subtitles.srt exists')
+    parser.add_argument('--no-compact', action='store_true',
+                        help='Keep verbatim spoken words (skip number/math-symbol compaction)')
 
     args = parser.parse_args()
 
@@ -547,7 +571,8 @@ def main():
     # Process each video
     results = []
     for video_folder in video_folders:
-        success, message = generate_subtitles_for_video(video_folder, args.force)
+        success, message = generate_subtitles_for_video(
+            video_folder, args.force, compact=not args.no_compact)
         results.append((success, message))
 
     # Print summary
