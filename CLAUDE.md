@@ -105,6 +105,8 @@ label collisions) with a screenshot:
    culprits: `next_to(point, …)` (places the mobject edge at the point, often
    overlapping a sibling), insufficient `buff=`, labels placed without checking
    the target's width, missing `scale_to_fit_width` on overflowable content.
+   The catalogue of defects that render SUCCESS and are still wrong is
+   `templates/manim_system_prompt.md` rules 36–66 — check it before guessing.
 4. Edit the Manim file with a targeted fix.
 5. Re-render the single frame:
    ```bash
@@ -167,8 +169,9 @@ numerals are correct and stay as digits; only the spoken text changes.
 **Automated pre-TTS narration gate.** The tts step halts before any audio is
 generated if TTS-unfriendly tokens survive in the spoken narration — raw
 numerals, Greek letters, math symbols, hex strings, unspaced differentials,
-bare initialisms, code tokens, the lowercase variable `a`, sentences starting
-with the name `A`. `scripts/utils/narration_check.py` scans the same source TTS
+unhyphenated Greek-letter compounds (`delta X` must be `delta-X`, or the voice
+drops dead air between the tokens), bare initialisms, code tokens, the
+lowercase variable `a`, sentences starting with the name `A`. `scripts/utils/narration_check.py` scans the same source TTS
 reads and reports offenders by category; it detects only, never rewrites. Fix
 each token in the named source and resume `--from tts`; bypass a confirmed
 false positive with `SKIP_NARRATION_CHECK=1`.

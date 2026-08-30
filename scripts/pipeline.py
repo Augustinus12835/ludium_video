@@ -907,7 +907,8 @@ def run_video_step(step: str, video_dir: Path, lecture_dir: Path,
             return False
 
         # Pre-TTS guard: halt if TTS-unfriendly tokens (raw numerals, Greek letters, math
-        # symbols, hex/opaque strings, unspaced differentials, bare initialisms, code tokens)
+        # symbols, hex/opaque strings, unspaced differentials, unhyphenated Greek compounds
+        # like "delta X", bare initialisms, code tokens)
         # survived into spoken narration. Surfaced like a SymPy failure so /run-pipeline triages
         # (convert the source vs. bypass a false alarm). Bypass with SKIP_NARRATION_CHECK=1.
         if not os.getenv("SKIP_NARRATION_CHECK"):

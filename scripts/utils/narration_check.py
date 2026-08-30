@@ -17,6 +17,9 @@ It DETECTS only — it never rewrites text. False positives are expected and fin
   hex           0xDEADBEEF                  -> spaced chars ("0 x D E A D B E E F")
   opaque        long letter+digit blobs     -> spaced chars (hashes / addresses / txids)
   differential  dx du dy …                  -> spaced ("d x", "d u")  [the "du"->"do" failure]
+  greek_compound "delta X" / "lambda t" / "two pi R"
+                                            -> hyphen-bound ("delta-X", "lambda-T", "two pi-R")
+                                               [spaced, TTS drops a beat of dead air between the tokens]
   acronym       UTXO ECDSA SHA …            -> spaced letters ("U T X O")  [allowlist read-as-words]
                 also mixed-case ("VaR" -> "value at risk", "CVaR", "DoS") and suffixed
                 ("UTXOs" -> "U T X O s") initialisms, which the all-caps run misses
@@ -56,6 +59,22 @@ _OPAQUE = re.compile(r"\b(?=[0-9A-Za-z]*[A-Za-z])(?=[0-9A-Za-z]*\d)[0-9A-Za-z]{8
 
 # Unspaced Roman-letter differentials: dx du dy dv dw dt dr ds dz (the "du" -> "do" failure).
 _DIFFERENTIAL = re.compile(r"\bd[xyuvwtrsz]\b")
+
+# Greek-letter name followed by a LOOSE single-letter variable ("delta X", "lambda t",
+# "sigma i", "two pi R"). The prompts require the hyphen-bound compound ("delta-X"): written
+# spaced, ElevenLabs drops a beat of dead air between the two tokens instead of voicing one
+# quantity. Calibrated over a 15,150-frame production corpus: 584 hits in 75 videos after the
+# three exclusions below, every one a genuine compound. Excluded — the article ("theta, a plane";
+# uppercase "theta A" IS a compound), a trailing "d" — always a differential in the corpus
+# ("d theta d t", "cosine theta d theta", "lambda d x prime"; the differential rule keeps those
+# spaced, and a genuine "delta d" is rare enough that missing it is the cheaper error), and the
+# Python keyword ("lambda X, colon …", "lambda X returning …"). Already-bound forms
+# ("delta X-one") are skipped.
+_GREEK_NAMES = (r"alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|"
+                r"omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega")
+_GREEK_COMPOUND = re.compile(
+    r"\b(?!(?i:lambda)\s+[A-Za-z]\s*(?:,|:|colon\b|returning\b))"
+    r"(?i:" + _GREEK_NAMES + r")\s+(?!a\b)(?!d\b)[A-Za-z]\b(?![-'])")
 
 # Initialisms: 2+ capitals in a row. Allowlist below holds the ones TTS reads fine as words.
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
@@ -217,6 +236,7 @@ _DETECTORS = [
     ("hex", _HEX.findall),
     ("opaque", _OPAQUE.findall),
     ("differential", _DIFFERENTIAL.findall),
+    ("greek_compound", _GREEK_COMPOUND.findall),
     ("acronym", _acronyms),
     ("code_token", _CODE_TOKEN.findall),
     ("variable_a", _variable_a),
@@ -301,6 +321,7 @@ def format_report(offenders, video_dir) -> str:
     lines.append("")
     lines.append("  Spoken narration must be fully TTS-ready — no raw numerals, Greek letters,")
     lines.append("  math symbols, hex/opaque strings, unspaced differentials (dx -> 'd x'),")
+    lines.append("  unhyphenated Greek-letter compounds ('delta X' -> 'delta-X', 'lambda t' -> 'lambda-T'),")
     lines.append("  bare initialisms, code tokens, lowercase variable 'a' (indexed 'a one' ->")
     lines.append("  'A-one'; bare 'a times t'/'a of t'/'slope a' -> 'A times t'/'A of t'/'slope A'),")
     lines.append("  or a sentence starting with the name 'A' (read as the article")

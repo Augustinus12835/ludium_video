@@ -137,6 +137,15 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      drifting letters (ElevenLabs voices "A X" as two loose letters; "A-X" pulls them
      together). Applies to math/finance/stats symbols in the `narration` field:
        - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B".
+       - **Greek-letter name + variable — ALWAYS hyphenate:** `Δx` → "delta-X",
+         `Δt` → "delta-T", `λt` → "lambda-T", `λI` → "lambda-I", `σ_i` → "sigma-I",
+         `θ_A` → "theta-A", `2πr` → "two pi-R", `βv²` → "beta-V squared", `e^λt` → "e
+         to the lambda-T"; a chain keeps every hyphen ("delta-Y over delta-X"). Written
+         spaced — "delta X" — ElevenLabs drops a beat of dead air between the two
+         tokens ("delta … X") instead of voicing one quantity. Two shapes are NOT
+         compounds and stay spaced: a Greek letter followed by a differential
+         (`dθ/dt` → "d theta d t", `λ dx` → "lambda d x") and the Python keyword
+         `lambda x:` ("lambda X, colon …" is prose, not a symbol).
        - Letter/word subscripts — hyphen only, never the spoken word "sub":
          `A_x` → "A-X", `B_y` → "B-Y", `sigma_n` → "sigma-N", `F_net` → "F-net"
          (numeric subscripts keep `a_1` → "A-one", above). The frame shows the
@@ -240,11 +249,17 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      `AttributeError` mentioned inside a traceback → "A t t r i b u t e Error".
      Otherwise prefer the natural prose form.
 
-     Library / tool names that ElevenLabs mispronounces — write them phonetically in
-     narration:
+     Library / tool names that ElevenLabs mispronounces — do NOT respell them phonetically
+     in narration: the spoken text is written VERBATIM into the subtitles, so "a too pull"
+     ships on screen as nonsense. Reword AROUND the token instead ("the iterative version",
+     "the while-loop version", "the NumPy library" is fine — the voice handles the name) and
+     let the on-screen code keep the real identifier; a stubborn token is fixed with a
+     pronunciation-dictionary alias (audio only, subtitles stay correct), never a respelling.
+     Spoken conventions that ARE the notation's real spoken form are fine:
        - `numpy` → "num pie", `matplotlib` → "mat plot lib", `pyplot` → "pie plot",
          `pytest` → "pie test", `venv` → "vee env"
-       - `tuple` → "too pull", `iter` → "it ter", `enum` → "ee num", `regex` → "redge ex"
+       - `tuple`, `iter`, `enum`, `regex` → never "too pull" / "it ter" / "ee num" /
+         "redge ex" — reword ("the tuple", "the iterative version", "the regular expression")
        - `argv` / `argc` → "arg v" / "arg c"
        - `stdin` / `stdout` / `stderr` → "standard in" / "standard out" / "standard err"
        - `REPL` → "repple" (spoken convention, rhymes with apple)
@@ -337,6 +352,15 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
          them together):
            - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B",
              `rθ` → "R-theta".
+           - **Greek-letter name + variable — ALWAYS hyphenate:** `Δx` → "delta-X",
+             `Δt` → "delta-T", `λt` → "lambda-T", `λI` → "lambda-I", `σ_i` →
+             "sigma-I", `θ_A` → "theta-A", `2πr` → "two pi-R", `βv²` → "beta-V
+             squared", `e^λt` → "e to the lambda-T"; a chain keeps every hyphen
+             ("delta-Y over delta-X", "delta-F over delta-X"). Written spaced —
+             "delta X" — ElevenLabs drops a beat of dead air between the two tokens
+             ("delta … X") instead of voicing one quantity. A Greek letter followed
+             by a differential is NOT a compound and stays spaced: `dθ/dt` → "d theta
+             d t", `λ dx` → "lambda d x".
            - Letter/word subscripts — hyphen only, never the spoken word "sub":
              `A_x` → "A-X", `sigma_n` → "sigma-N", `F_net` → "F-net" (numeric
              subscripts keep "A-one" above). The slide shows the subscript, so

@@ -13,7 +13,7 @@ full 4K render into a few seconds:
 
 Each run gets its OWN media dir. Concurrent manim jobs sharing one `--media_dir`
 race the Tex cache and die with a misleading "does not support converting .dvi to
-SVG" (see MEMORY.md manim_parallel_media_dir_race).
+SVG" — dvisvgm is fine; the cache raced.
 
 usage:
     preflight_manim.py pipeline/<L>/Video-N              # every frame, vs its audio
