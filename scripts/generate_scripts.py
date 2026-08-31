@@ -139,11 +139,7 @@ REQUIREMENTS:
    - "Diagram of the derivative concept" (too vague — no elements, no arrangement)
    - "Show why limits matter" (no concrete visual content at all)
 
-4. **Script Style:**
-   - Concise conversational (per teaching_style_guide)
-   - No filler words ("um", "basically", "actually", "kind of")
-   - Active voice throughout
-   - No rhetorical questions or verbal cushioning
+4. **Script Style:** follow the TEACHING STYLE GUIDE above.
 
 5. **Teaching Flow:** frames follow the Hook → Build → Deepen → Apply flow you planned
    from the source content.
@@ -351,11 +347,8 @@ REQUIREMENTS:
    - "Diagram of NPV calculation" (too vague — no specifics)
    - "Network showing blockchain" (no node/edge details)
 
-4. **Script Style:**
-   - Concise conversational (per teaching_style_guide)
-   - No filler words ("um", "basically", "actually", "kind of")
-   - Active voice throughout
-   - No rhetorical questions or verbal cushioning
+4. **Script Style & spoken-text (TTS) rules:** follow the TEACHING STYLE GUIDE above.
+   For the spoken `narration` field, additionally:
 """ + TECHNICAL_NARRATION_TTS_RULES + """
 
 5. **Teaching Flow:** frames follow the Hook → Build → Deepen → Apply flow you planned
@@ -566,30 +559,19 @@ SOURCE CONTENT (ground truth — the lecture material this video must teach):
 # documentation only and is NOT read by the pipeline (an earlier version
 # pretended to load it, then discarded the contents).
 STYLE_KEY_POINTS = """Key Style Points:
-- Concise conversational: Every word earns its place
-- NO filler words: "um", "basically", "actually", "kind of", "you know"
-- NO rhetorical questions: State facts directly
-- NO verbal cushioning: "So basically what I'm trying to say is..."
-- Active voice always
-- Contractions OK but sparingly
-- 2.5 words per second pacing
-- State each concept ONCE, don't repeat
-- "We" only when doing something together
-- "You" only when action required
+- Concise conversational: every word earns its place; active voice; state each concept ONCE
+- No rhetorical questions, no verbal cushioning ("So what this means is...")
+- NO pet abstractions: "framing", "machinery", and "load-bearing" are overused across this \
+channel — do not use them (unless literal); name the concrete thing instead
+- NO "it's not X, it's Y" contrastives (any variant — "not just X, but Y", "X isn't Y; it's Z") \
+— say what the thing IS directly
+- Contractions OK but sparingly; 2.5 words per second pacing
+- "We" only when doing something together; "you" only when action required
 
-TTS PRONUNCIATION (CRITICAL for audio generation):
-- NEVER use Unicode Greek letters (π, θ, α, β, etc.) in narration text
-- Write Greek letters as English words for correct TTS pronunciation:
-  * π → "pi" (the word, not the Greek letter)
-  * θ → "theta"
-  * α → "alpha"
-  * β → "beta"
-  * γ → "gamma"
-  * δ → "delta"
-  * σ → "sigma"
-  * ω → "omega"
-- In the `visual` field / on-screen text, Unicode symbols and digits are OK since they're not spoken
-- Example: "sine of pi over four" NOT "sine of π/4" (math/technical videos spell out ALL digits in spoken narration — see the TTS-safe narration rules below) """
+TTS PRONUNCIATION (the narration is read aloud by a voice model):
+- No Unicode Greek letters in narration — write the English word ("pi", "theta", "delta"):
+  "sine of pi over four", never "sine of π/4". The `visual` field / on-screen text keeps
+  symbols and digits — it is not spoken."""
 
 
 def load_style_guide() -> str:

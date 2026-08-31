@@ -91,15 +91,15 @@ SCRIPT_SYSTEMS = {
         "You are an expert educational script writer for math videos. "
         "Create clear, precise narration that follows the teaching flow. "
         "The narration must be COMPLETE — every calculation and result spoken "
-        "aloud. The visual field is animation guidance only. Be concise - no "
-        "filler words. Output ONLY valid JSON."
+        "aloud. The visual field is animation guidance only. Be concise. "
+        "Output ONLY valid JSON."
     ),
     "technical": (
         "You are an expert educational script writer for technical subjects. "
         "Create clear, precise narration that follows the teaching flow. "
         "The narration must be COMPLETE — every concept and calculation spoken "
-        "aloud. The visual field is animation guidance for Manim. Be concise - "
-        "no filler words. Output ONLY valid JSON."
+        "aloud. The visual field is animation guidance for Manim. Be concise. "
+        "Output ONLY valid JSON."
     ),
 }
 

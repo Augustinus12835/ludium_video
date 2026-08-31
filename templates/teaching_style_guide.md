@@ -44,16 +44,6 @@ This guide defines the teaching and narration style for automated educational vi
 - "Key point:" (before crucial concept)
 - "Remember:" (callback to earlier point)
 
-### Avoid Entirely
-- "Let me just..."
-- "Essentially..."
-- "You see?"
-- "Right?"
-- "Make sense?"
-- "The key thing is..."
-- "You need to understand..."
-- "This is very important..."
-
 ### BANNED contrastive constructions
 
 **Never** use the formula "It's not X, it's Y" or any variant. This has become a tell of AI-generated writing. Banned patterns include:
@@ -75,9 +65,12 @@ This guide defines the teaching and narration style for automated educational vi
 
 ### Efficient Speech Patterns
 - **Contractions:** Use (it's, we're, don't) but sparingly
-- **NO filler words:** No "um", "uh", "basically", "actually", "kind of"
 - **NO redundancy:** Say it once, move on
 - **NO rhetorical questions:** State facts directly
+- **NO pet abstractions:** "framing", "machinery", and "load-bearing" are overused across the
+  channel — avoid them (unless literal); name the concrete thing instead
+- **NO patronizing emphasis:** "You need to understand...", "This is very important..." — just
+  state the fact
 - **Active voice:** Always
 
 ### Inclusive Language (Minimal)
@@ -141,11 +134,6 @@ and we [operation] it by [value], right? So [value]
 "Right side shows [contrast]."
 ```
 
-**Skip entirely:**
-- "Let me just get my pointer..."
-- "If you look at this here..."
-- "Now if we look over here..."
-
 Frame changes happen naturally - no need to narrate them.
 
 ---
@@ -154,37 +142,9 @@ Frame changes happen naturally - no need to narrate them.
 
 ### Every Word Must Earn Its Place
 
-**Remove These Patterns:**
-
-**Verbal cushioning:**
-- "So basically what I'm trying to say is..."
-- "What I mean by that is..."
-- "In other words..."
-- "To put it simply..."
-
-**Redundant confirmations:**
-- "...right?"
-- "...you see?"
-- "...make sense?"
-
-**Unnecessary setup:**
-- "Let me just..."
-- "So here's the thing..."
-- "What we want to do is..."
-
-**Patronizing language:**
-- "Make sure you..."
-- "You need to understand..."
-- "This is very important..."
-
-### Replace With Direct Statements
-
-| Instead of (wordy) | Use (direct) |
-|-------------------|--------------|
-| "So what this means is that..." | "This means..." |
-| "Let me just explain what I mean by..." | "[Term] is..." |
-| "You need to understand that..." | [Just state the fact] |
-| "Make sure you remember..." | "Remember:" |
+No verbal cushioning or setup before the point ("So what this means is...", "What we want to
+do is..." — say "This means..." or just do it), and no patronizing emphasis ("Make sure
+you...", "You need to understand..." — state the fact).
 
 ### One-Time Rule
 
@@ -233,10 +193,9 @@ Before finalizing any script, verify:
 - [ ] Word count per frame: seconds × 2.5 words
 
 **Word Economy:**
-- [ ] NO filler words
 - [ ] NO rhetorical questions
-- [ ] NO verbal cushioning
-- [ ] NO patronizing language
+- [ ] NO verbal cushioning or patronizing emphasis
+- [ ] NO pet abstractions ("framing", "machinery", "load-bearing")
 - [ ] Each concept stated ONCE
 - [ ] Frame 0 does NOT start with "What if", "Imagine", "Picture this", or any rhetorical question
 - [ ] NO "It's not X, it's Y" (or variants like "not just X, but Y") — define directly instead
