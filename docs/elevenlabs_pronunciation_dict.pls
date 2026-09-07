@@ -141,4 +141,15 @@
   <lexeme><grapheme>etc.</grapheme><alias>et cetera</alias></lexeme>
   <lexeme><grapheme>vs.</grapheme><alias>versus</alias></lexeme>
 
+  <!-- 7. Single capital letters used as variables (added 2026-09-02, listener-reported).
+       A standalone capital V after a sibilant elides: "times V of T" and "one minus V of T"
+       were both heard as "five of T" by a listener, and an isolated-clip Scribe pass
+       transcribed them "length of T" and "f of T". NB a FULL-FRAME Scribe pass transcribes
+       them CORRECTLY — its language model repairs the letter from context, so full-context
+       ASR is a false-clean detector for this class; only a short isolated clip exposes it.
+       "vee" is the phonetic respelling, matching section 3b's pie/roe pattern rather than
+       the bare letter-name ElevenLabs mangles. Subtitles are unaffected (alignment is
+       against the input text, so the SRT still reads "V"). -->
+  <lexeme><grapheme>V</grapheme><alias>vee</alias></lexeme>
+
 </lexicon>

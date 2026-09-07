@@ -108,6 +108,22 @@ and PPTX sources arrive with `content_cleaned.txt` — start at segment.
    subagent returns anchor-based JSON → save it →
    `segment_concepts.py pipeline/<L> --apply <response>`. On "Anchor split failed",
    re-spawn the subagent with the error appended.
+5. **colour scheme (REQUIRED, before any script is authored).** Colour is a LECTURE-WIDE
+   decision made ONCE, here, by the orchestrator — not per video, and not after the fact.
+   Render the prompt, spawn ONE subagent, save its JSON verbatim:
+   ```bash
+   venv/bin/python scripts/render_step_prompt.py color_scheme --pipeline-dir pipeline/<L>
+   #   → subagent returns {name: {color, tex, note_words, scope}} → pipeline/<L>/color_scheme.json
+   ```
+   From then on it is plumbed automatically: `render_step_prompt.py script` injects it as
+   **background** for the scripting agent (so `visual` text names *quantities*, never colour
+   words), and every video's `render_step_prompt.py color_plan` injects it as a **binding
+   inheritance**. Loading it warns on stderr about a non-Manim colour constant, a reserved
+   WHITE/YELLOW, a duplicate colour, or a missing one — fix those before scripting, since a
+   bad constant otherwise surfaces only in a 4K render hours later. The scheme is
+   lecture-level because a per-video choice let the script author hard-code colour words into
+   `visual` that fought the producer's plan, and let one quantity change colour between
+   videos while every video's own lint passed.
 
 ### Phase B (per video) — B1 scripting → review relay → B2 production
 

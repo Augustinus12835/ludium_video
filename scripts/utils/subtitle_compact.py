@@ -580,6 +580,8 @@ def _pass_phrases(toks: List[_Tok], math_mode: bool) -> None:
             if j <= len(toks) and \
                     tuple(t.core.lower() for t in toks[i:j]) == words and \
                     _clean_between(toks, i, j):
+                if sym == '√' and not _sqrt_scope_ok(toks, j, math_mode):
+                    break
                 _merge(toks, i, j, sym)
                 if sym == '√':
                     _glue_sqrt(toks, i, math_mode)
@@ -588,6 +590,45 @@ def _pass_phrases(toks: List[_Tok], math_mode: bool) -> None:
         if math_mode and i - 1 < len(toks) and \
                 toks[i - 1].core.lower() == 'infinity':
             toks[i - 1].core, toks[i - 1].mathy = '∞', True
+
+
+# Words that continue a spoken radicand past its first term. "square root of
+# nine plus four" is √13, NOT √9 + 4 — the radical sign takes a scope the
+# spoken form does not, so we only emit √ when the radicand is one atom.
+_SQRT_CONTINUERS = frozenset({
+    'plus', 'minus', 'times', 'over', 'divided', 'squared', 'cubed',
+})
+
+
+def _sqrt_scope_ok(toks: List[_Tok], j: int, math_mode: bool) -> bool:
+    """True if "square root of" at toks[j-3:j] may become a √ sign.
+
+    Only safe when the radicand is a single atom that nothing extends: √ binds
+    exactly one following token, while the spoken form's scope runs to the end
+    of the phrase. Emitting it for "nine plus four" or "three squared plus two
+    squared" asserts arithmetic the narration never said, and a radicand the
+    glue cannot take at all leaves a bare √ stranded in front of prose.
+    """
+    if j >= len(toks) or toks[j - 1].trail or toks[j].lead:
+        return False
+    nxt = toks[j]
+    if nxt.mathy or (math_mode and _is_single_letter(nxt.core)):
+        end = j + 1
+    else:
+        np = _parse_cardinal(toks, j)
+        if not np:
+            return False            # prose radicand: would strand a bare √
+        end = np.end
+    if end >= len(toks) or toks[end - 1].trail or toks[end].lead:
+        return True                 # radicand closed by punctuation or EOS
+    follow = toks[end]
+    if follow.core.lower() in _SQRT_CONTINUERS:
+        return False
+    if follow.mathy or (math_mode and _is_single_letter(follow.core)):
+        return False
+    # A spoken cardinal after the radicand is a subscript ("a one squared…"),
+    # so the radicand is a letter-plus-index pair, not the single atom √ takes.
+    return _parse_cardinal(toks, end) is None
 
 
 def _glue_sqrt(toks: List[_Tok], i: int, math_mode: bool) -> None:
@@ -622,6 +663,18 @@ def _pass_powers(toks: List[_Tok], math_mode: bool) -> None:
         i += 1
 
 
+def _is_fraction_tail(toks: List[_Tok], end: int) -> bool:
+    """True if a just-parsed cardinal is the numerator of a spoken fraction:
+    "negative one third", "negative two thirds". Digitising only the numerator
+    strands the denominator ("-1 third"), so leave the whole phrase alone --
+    which is already what an unsigned "two thirds" does.
+    """
+    if end >= len(toks) or toks[end - 1].trail or toks[end].lead:
+        return False
+    w = toks[end].core.lower().rstrip('s')
+    return w in _ORD_ALL or w in ('half', 'quarter')
+
+
 def _pass_negative(toks: List[_Tok]) -> None:
     i = 0
     while i < len(toks) - 1:
@@ -634,7 +687,7 @@ def _pass_negative(toks: List[_Tok]) -> None:
                 i += 1
                 continue
             np = _parse_cardinal(toks, i + 1)
-            if np:
+            if np and not _is_fraction_tail(toks, np.end):
                 _merge(toks, i + 1, np.end, np.text)
                 _merge(toks, i, i + 2, '-' + toks[i + 1].core)
                 i += 1
@@ -652,6 +705,57 @@ def _pass_coefficients(toks: List[_Tok]) -> None:
                 t.core, t.mathy = str(v), True
 
 
+# Words that continue a spoken denominator past its first term. Exactly the
+# scope problem _SQRT_CONTINUERS solves for the radical: "a over b plus c" is
+# spoken for a/(b+c), but the slash binds only b, so emitting it asserts
+# (a/b)+c -- a different, false statement. We therefore only emit "/" when the
+# denominator is one atom that nothing extends, and otherwise leave the spoken
+# "over" in place (uncompacted but true).
+_DENOM_CONTINUERS = frozenset({'plus', 'minus'})
+
+
+def _denom_scope_ok(toks: List[_Tok], i: int) -> bool:
+    """True if the "over" at toks[i] may become a "/".
+
+    "a over b plus c" is ambiguous: it is a/(b+c) when one fraction is being
+    read aloud, and (a/b) + c when two terms are being summed. The tell is
+    what follows the "plus": a SECOND "over" in the same clause means the plus
+    joins two fractions, so each numerator/denominator pair is closed and the
+    slash is safe ("one over m-one plus one over m-two" -> 1/m1 + 1/m2). With
+    no further "over", the plus continues the denominator, and slashing it
+    asserts a different, false statement.
+    """
+    end = i + 2
+    if end >= len(toks) or toks[end - 1].trail or toks[end].lead:
+        return True                 # closed by punctuation or end of stream
+    if toks[end].core.lower() not in _DENOM_CONTINUERS:
+        return True
+    # A continuer follows. This is the parallel-fractions shape ("one over m-one
+    # plus one over m-two") only if a SECOND "over" follows with nothing but a
+    # plausible numerator in between. Scanning to the end of the clause instead
+    # is too permissive: "m-two over m-one plus m-two becomes m-one minus two
+    # m-one over ..." finds the later, unrelated fraction and licenses a merge
+    # that asserts the wrong grouping.
+    for k in range(end + 1, len(toks)):
+        t = toks[k]
+        if t.core.lower() == 'over':
+            return True
+        if t.trail or t.lead:
+            break
+        if not _numerator_material(t):
+            break
+    return False
+
+
+def _numerator_material(t: _Tok) -> bool:
+    """True if `t` could be part of a spoken numerator: a math token, a single
+    letter, or a bare number word. Anything else (a verb, a connective) means
+    the following "over" belongs to a different fraction."""
+    if t.mathy or _is_single_letter(t.core):
+        return True
+    return _word_number_value(_hyphen_parts(t.core)) is not None
+
+
 def _pass_over_times(toks: List[_Tok]) -> None:
     i = 1
     while i < len(toks) - 1:
@@ -660,15 +764,21 @@ def _pass_over_times(toks: List[_Tok]) -> None:
         if w in ('over', 'times') and not t.lead and not t.trail and \
                 not toks[i - 1].trail and not toks[i + 1].lead:
             a, b = toks[i - 1], toks[i + 1]
-            # upgrade a weak single number word on one side of a mathy token
-            for side, other in ((a, b), (b, a)):
-                if other.mathy and not side.mathy:
+            # Upgrade a weak single number word on one side of a mathy token.
+            # Skip a number that is a spoken fraction's numerator ("times two
+            # thirds"): digitising it strands the denominator as a word.
+            for side, other, tail in ((a, b, i - 1), (b, a, i + 2)):
+                if other.mathy and not side.mathy \
+                        and not _is_fraction_tail(toks, tail):
                     v = _word_number_value(_hyphen_parts(side.core))
                     if v is not None:
                         side.core, side.mathy = str(v), True
             if a.mathy and b.mathy:
                 if w == 'over':
-                    _merge(toks, i - 1, i + 2, a.core + '/' + b.core)
+                    if _denom_scope_ok(toks, i):
+                        _merge(toks, i - 1, i + 2, a.core + '/' + b.core)
+                        continue
+                    i += 1
                     continue
                 t.core, t.mathy = '×', True
         i += 1
@@ -684,7 +794,7 @@ def _pass_symbol_operands(toks: List[_Tok]) -> None:
     for i in range(len(toks) - 1):
         t, nxt = toks[i], toks[i + 1]
         if t.core in _OPERAND_SYMBOLS and not t.trail and not nxt.lead \
-                and not nxt.mathy:
+                and not nxt.mathy and not _is_fraction_tail(toks, i + 2):
             v = _word_number_value(_hyphen_parts(nxt.core))
             if v is not None:
                 nxt.core, nxt.mathy = str(v), True

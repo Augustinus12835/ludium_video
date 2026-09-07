@@ -17,7 +17,7 @@ Source → Transcription → Cleaning → Segmentation → Per-video processing
 
 **The architectural rule: every LLM step is a Claude Code subagent, never an
 API call.** `scripts/render_step_prompt.py` renders the exact prompt for each
-LLM step (clean, segment, script, verify_math, color_plan, manim codegen); the
+LLM step (clean, segment, script, verify_math, color_scheme, color_plan, manim codegen); the
 `/run-pipeline` skill spawns subagents that follow those prompts.
 `scripts/pipeline.py` runs the deterministic steps (transcribe, tts,
 animate-render of pre-authored sources, compile, subtitle) and halts with the
@@ -83,6 +83,32 @@ flag explicitly.
   get `math_steps` + SymPy, code frames get `code_steps` (traced execution) and
   the Manim code-block layout, visual frames are free-form.
 
+### Recompiling Video
+
+```bash
+python scripts/compile_video.py pipeline/LECTURE/Video-N
+```
+
+**`final_video.mp4` existing is not evidence the compile finished.** A non-faststart mp4
+gets its `moov` atom written LAST, so a file still being written — or one whose ffmpeg
+died partway — sits on disk at a plausible size and fails to probe (`moov atom not
+found`). Mtime checks cannot catch it either, because mtime updates on every write.
+`detect_video_state()` requires `probe_duration()` to succeed and `verify_compilation()`
+reports `probe_ok`, but before reporting a video done, still confirm:
+
+```bash
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \
+    pipeline/LECTURE/Video-N/final_video.mp4     # must print a duration
+```
+and that the duration ≈ the sum of the decoded audio durations.
+
+**Patching a frame source after an animate pass re-renders it automatically.**
+`prepare_frame_code()` in `generate_math_animation.py` compares the mp4's mtime against
+`frame_N_manim.py` instead of merely checking that the mp4 exists, so `--from animate`
+never keeps a stale render and prints VIDEO COMPLETE over it; you need not `rm` the mp4
+first. The comparison deliberately ignores the mp3 — `fix_tts_sentence.py` rewrites audio
+in place at the identical span and must not trigger a re-render.
+
 ### Fixing Frames From Screenshots
 
 When the user reports a visual issue (overlapping text, boxes outside frame,
@@ -106,7 +132,7 @@ label collisions) with a screenshot:
    overlapping a sibling), insufficient `buff=`, labels placed without checking
    the target's width, missing `scale_to_fit_width` on overflowable content.
    The catalogue of defects that render SUCCESS and are still wrong is
-   `templates/manim_system_prompt.md` rules 36–66 — check it before guessing.
+   `templates/manim_system_prompt.md` rules 36–73 — check it before guessing.
 4. Edit the Manim file with a targeted fix.
 5. Re-render the single frame:
    ```bash

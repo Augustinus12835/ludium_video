@@ -35,6 +35,15 @@ carries it best. Then regenerate `script.md`:
 venv/bin/python -c "from pathlib import Path; from scripts.utils.script_parser import load_script, save_script; vd=Path('pipeline/<L>/Video-N'); save_script(load_script(vd), vd, write_json=False, write_md=True)"
 ```
 
+**Colour is not yours to choose.** When the lecture has a staged `color_scheme.json`, the
+rendered prompt already carries it as background — which quantity wears which colour, for
+the whole lecture. Write every `visual` in terms of the QUANTITY ("the slope", "the step
+size"); the colour follows it automatically downstream, so you never need to mention one.
+Name a raw colour only where the frame's meaning depends on it (a red warning, a gold boxed
+result, "the two curves must read as distinct") and only in a colour the scheme has not
+committed elsewhere. Hard-coding your own colour words makes the script fight the
+producer's plan.
+
 Report to the orchestrator once the script is written. Review issues (below) come back to
 you via `SendMessage`; apply every script-content fix yourself — you are the sole author of
 `script.json`. After any narration change, recompute `word_count`/`timing`/`metadata.*` and
@@ -63,24 +72,27 @@ TTS-safe; displayed code/results match the narration. Also hunt phonetic respell
 ter", "too pull") — they ship VERBATIM into the SRT and no gate flags them; reword around the
 token instead.
 
-**Measure, don't guess.** Every real finding on a 120-frame unit came from two things the
-reviewer was told to do: (1) build representative `MathTex` in actual Manim, measure widths
-against the **13.0 u × 7.4 u safe zone** (a Layout-B half column is ~5.8–7.0 u with ~6 rows
-before auto-scroll) and simulate `make_step_column` against the declared row count — a
-column that scrolls drops its TOP row, and three times that row was the frame's punchline;
-(2) compute each beat's spoken offset at ~150 wpm and report, PER FRAME, the first-beat and
-last-beat offsets and every span > 6 s with nothing scheduled — the most common defect is a
-frame whose `visual` schedules nothing for its first 10–20 s, or a 25 s hold on one table
-row. Every frame must put something on screen within ~5 s and name a beat per
-sentence-group. Also verify: every `On "…"` cue phrase occurs EXACTLY ONCE in its frame's
-narration (a later cue containing an earlier one as a substring misfires silently); a
+**Measure, don't guess.** Ask the reviewer for numbers, not verdicts:
+(1) Build representative `MathTex` in actual Manim and measure widths against the **13.0 u ×
+7.4 u safe zone** (a Layout-B half column is ~5.8–7.0 u wide). Simulate `make_step_column`
+against the declared row count with the config that will actually ship — `font_size`/`scale`,
+`step_buff`, AND `add_step`'s note label (~0.12 u per row even when the label is empty).
+**The scroll trigger is the `board_top` 2.3 → `scroll_bottom` −3.2 band — ~5.5 u usable
+(~6.3 u when the first row is tall) — NOT the 7.4 u safe height**: a stack checked against
+7.4 u "doesn't scroll", does, and drops its TOP row, which is usually the punchline. Report the
+simulation as a table over candidate sizes and confirm on a rendered still at the punchline
+beat, not on the arithmetic alone. (2) Compute each beat's spoken offset at ~150 wpm and
+report, PER FRAME, the first-beat and last-beat offsets and every span > 6 s with nothing
+scheduled — the most common defect is a `visual` that schedules nothing for its first 10–20 s
+or holds one table row for 25 s. Every frame must put something on screen within ~5 s and name
+a beat per sentence-group. Also verify: every `On "…"` cue phrase occurs EXACTLY ONCE in its
+frame's narration (a later cue containing an earlier one as a substring misfires silently); a
 terminal reveal has margin before the narration end (script seconds run 5–10 % long against
-real TTS and compile trims anything past the audio); quoted on-screen note strings compile —
-bare `^`, `_`, `\sin` outside `$…$` in a `Tex` note crash, `$` inside a `MathTex` spec
-crashes the other way; no raw Unicode math glyphs (`×`, `⋯`, `→`) in strings bound for
-MathTex; any `scale_to_fit_width` instruction is conditional ("if wider than 12.5 u") with
-one shared scale per stack. Ask for the numbers, not a verdict — an author's "no gap > 10 s"
-has been wrong by 20 s more than once.
+real TTS and compile trims anything past the audio); quoted on-screen note strings compile
+(bare `^`, `_`, `\sin` outside `$…$` in a `Tex` note crash, `$` inside a `MathTex` spec crashes
+the other way); no raw Unicode math glyphs (`×`, `⋯`, `→`) in strings bound for MathTex; any
+`scale_to_fit_width` instruction is conditional ("if wider than 12.5 u") with one shared scale
+per stack.
 
 **Cross-video duplication (every multi-video lecture).** The dominant defect on an 8-video
 lecture was repetition BETWEEN videos: each script agent re-establishes context at the top of
@@ -155,6 +167,27 @@ and note words), and insert it as the top-level `color_plan` key of
 `math_verification.json` (`{}` if nothing recurs). Every Manim prompt injects it as the
 VIDEO COLOR PLAN block — it's what keeps the same quantity the same color across all frames.
 
+**You are not choosing the palette.** The lecture's colour scheme was decided once in Phase A
+and staged at `pipeline/<L>/color_scheme.json`; the rendered prompt carries it as a binding
+inheritance. Your plan **copies every scheme entry whose quantity appears in this video,
+colour unchanged**, extends its `tex` list with any forms this video adds, and only then adds
+entries for genuinely video-local quantities — in colours the scheme has not used. Never
+re-colour a scheme quantity and never re-use a scheme colour for something else: that is
+precisely the cross-video drift the scheme exists to stop (one quantity teal in Video-1 and
+gold in Video-2 while every video's own lint passed).
+
+Two things still on you, because the scheme cannot know them:
+- **A colour must mean one thing at a time on screen.** A quantity outside the scheme may
+  still collide with one inside it — gold doing double duty as both the true solution curve
+  and a second slope makes them indistinguishable. If two things share a colour in one frame,
+  re-colour the non-scheme one and say so in your report.
+- **The ~3-links-per-frame cap still applies.** If more scheme quantities land on a frame than
+  that, colour the most central and leave the rest default — don't drop them from the plan.
+
+The script's `visual` fields are written in quantities, not colour words, precisely so this
+step (and codegen) owns the mapping. If a `visual` names a raw colour, treat it as a
+deliberate local accent the author needed, and check it against the scheme before honouring it.
+
 ### 3. tts
 
 ```bash
@@ -168,15 +201,20 @@ check"); `SKIP_NARRATION_CHECK=1` only for a confirmed false positive.
 
 List the frames: `render_step_prompt.py manim --video-dir <dir> --pretty`.
 
+**Read the codegen SYSTEM prompt once per video, not once per frame.** It is identical for
+every frame (it IS `templates/manim_system_prompt.md` — its layout factories, safe zones and
+rules are binding; rules 36–73 are the silent-defect catalogue, everything that renders
+SUCCESS and is wrong), ~90 KB, and the single largest thing in your context, so render it
+once and keep it: `render_step_prompt.py manim --video-dir <dir> --frame <first N>
+--system-only > <scratch>/codegen_system.json`. Re-read the catalogue when a still looks
+"slightly off", not before every frame.
+
 Per `needs_authoring` frame N:
 
-1. `render_step_prompt.py manim --video-dir <dir> --frame N` → `{system, user, notes}` is
-   the exact codegen prompt. Read both fields. The `system` field IS
-   `templates/manim_system_prompt.md` — its layout factories, safe zones, and rules are
-   binding; rules 36–66 are the silent-defect catalogue (everything that renders SUCCESS
-   and is wrong) — read them before the first frame and again when a still looks "slightly
-   off". Prompts carry the VIDEO COLOR PLAN block — apply it exactly (tex forms →
-   `t2c=`, drawn graph objects → `.set_color()`, note words → `label_t2c=`).
+1. `render_step_prompt.py manim --video-dir <dir> --frame N --user-only` → `{user, notes}`
+   is the frame-specific half of the codegen prompt (narration, steps, word transcript,
+   VIDEO COLOR PLAN). The system half is the one you already read. Apply the plan exactly
+   (tex forms → `t2c=`, drawn graph objects → `.set_color()`, note words → `label_t2c=`).
 2. Write the scene to `frames/frame_N_manim.py`. Before rendering, the cheap preflights
    catch most failures: `scripts/preflight_manim.py` (LaTeX dry-run) and
    `scripts/lint_manim_t2c.py`.
@@ -269,6 +307,15 @@ both directions of freshness: every `frame_N.mp4` newer than its `frame_N_manim.
 an edit never rendered) and older than `final_video.mp4` (else a render never compiled).
 Ten mp4s sharing one mtime after a cosmetic batch rewrite is a false alarm — settle it with
 a re-render + pixel diff.
+
+**Freshness guards the code enforces (no need to `rm` an mp4 first):** `prepare_frame_code()`
+re-renders any frame whose `frame_N_manim.py` is newer than its mp4 (source only — the mp3 is
+deliberately ignored so `fix_tts_sentence.py` never triggers a re-render), and
+`detect_video_state()` / `verify_compilation()` treat a `final_video.mp4` that fails
+`probe_duration()` as NOT done (a non-faststart mp4 writes its `moov` atom last, so size and
+mtime prove nothing). **Still yours:** before reporting a video complete, confirm its duration
+≈ the sum of the decoded audio durations — the guards prove the file is playable, not that it
+holds the right footage.
 
 ### Stage 2 return
 

@@ -377,7 +377,15 @@ def execute_ffmpeg(cmd: List[str]) -> Tuple[bool, str]:
 
 
 def get_video_duration(video_path: str) -> float:
-    """Get video duration in seconds using ffprobe"""
+    """Get video duration in seconds using ffprobe, or 0.0 if unplayable.
+
+    Returns 0.0 rather than raising when ffprobe cannot read the file — a
+    truncated or still-being-written mp4 has no `moov` atom (it is written
+    LAST for non-faststart output), so ffprobe emits nothing on stdout and the
+    old `float('')` raised a bare ValueError far from the real cause. Callers
+    treat 0.0 as "not a finished video"; see `verify_compilation`'s
+    `probe_ok`.
+    """
     cmd = [
         'ffprobe', '-v', 'error',
         '-show_entries', 'format=duration',
@@ -386,7 +394,10 @@ def get_video_duration(video_path: str) -> float:
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    return float(result.stdout.strip())
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
 
 
 def get_video_info(video_path: str) -> Dict:
@@ -424,13 +435,20 @@ def verify_compilation(video_folder: str, frames: List[FrameData]) -> Dict:
     file_size = os.path.getsize(video_path)
     results['file_size_mb'] = file_size / (1024 * 1024)
 
-    # Check duration
+    # Check duration. A 0.0 here means ffprobe could not read the file at all
+    # (truncated / still being written — no `moov` atom), which is a HARD
+    # failure distinct from "duration is off by a few seconds".
     expected_duration = frames[-1].end_time
     actual_duration = get_video_duration(video_path)
+    results['probe_ok'] = actual_duration > 0.0
     results['expected_duration'] = expected_duration
     results['actual_duration'] = actual_duration
     results['duration_diff'] = abs(actual_duration - expected_duration)
-    results['duration_ok'] = results['duration_diff'] <= 2.0
+    results['duration_ok'] = results['probe_ok'] and results['duration_diff'] <= 2.0
+    if not results['probe_ok']:
+        print("      ERROR: final_video.mp4 exists but is NOT PLAYABLE "
+              "(ffprobe found no duration — truncated or still being written). "
+              "Do not mark this video complete.")
 
     # Check video properties
     video_info = get_video_info(video_path)

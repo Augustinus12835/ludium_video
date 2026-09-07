@@ -179,14 +179,6 @@ REQUIREMENTS:
    - Do NOT include any meta-commentary or "that's all for today" style endings
 """ + MATH_NARRATION_TTS_RULES + """
 
-8. **Cross-Frame Math Context:**
-   - Each frame includes a "math_context" field: a 1-3 sentence summary of mathematical
-     results/state carried forward from ALL prior frames to this one.
-   - Frame 0: omit or empty string (no prior context).
-   - Focus on results and key expressions, not narration recap.
-   - Example: "We defined f(x) = x³ − 3x + 1, found f'(x) = 3x² − 3, and set f'(x) = 0
-     to get critical points at x = ±1."
-
 OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
 {{
   "title": "Video Title Here",
@@ -229,8 +221,7 @@ OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
       "visual": {{
         "type": "conceptual",
         "reference": "Secant-to-tangent intuition: graph y = x^2, fix point P at x = 1, second point Q slides toward P while the secant line rotates into the tangent line. Label the secant slope updating as Q moves; end with the tangent line highlighted."
-      }},
-      "math_context": "We introduced f(x) = x^2 and motivated the concept of instantaneous rate of change."
+      }}
     }},
     {{
       "number": 2,
@@ -246,8 +237,7 @@ OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
       "visual": {{
         "type": "conceptual",
         "reference": "Layout B: Graph f(x) = x^2 on [-2, 3] in left panel, draw tangent line at x=1 with slope labeled '2'. Right panel: apply power rule to get f'(x) = 2x, evaluate f'(1) = 2, conclude slope = 2."
-      }},
-      "math_context": "We motivated the tangent line as the limit of secant lines through P at x = 1."
+      }}
     }}
   ]
 }}
@@ -387,14 +377,6 @@ REQUIREMENTS:
    - The narration should end naturally with the final teaching point
    - Do NOT include any meta-commentary or "that's all for today" style endings
 
-8. **Cross-Frame Context:**
-   - Each frame includes a "math_context" field: a 1-3 sentence summary of
-     results/state carried forward from ALL prior frames to this one.
-   - Frame 0: omit or empty string (no prior context).
-   - Focus on results and key definitions, not narration recap.
-   - Example: "We defined NPV as the sum of discounted cash flows, established r=10%,
-     and computed NPV=377.41 for the base case."
-
 OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
 {{
   "title": "Video Title Here",
@@ -437,8 +419,7 @@ OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
       "visual": {{
         "type": "conceptual",
         "reference": "Layout A: Derive the present value formula. Steps: write PV = CF/(1+r)^t, substitute CF=1000, r=0.08, t=5, evaluate to get PV=680.58."
-      }},
-      "math_context": "We introduced the concept of time value of money."
+      }}
     }},
     {{
       "number": 2,
@@ -454,8 +435,7 @@ OUTPUT FORMAT (respond with ONLY the JSON, no markdown code blocks):
       "visual": {{
         "type": "conceptual",
         "reference": "Show the bond cash flow structure: 'Investor' box on left, 'Bond Issuer' box on right. Arrow from Investor to Issuer labeled 'Purchase Price ($950)'. Then multiple arrows from Issuer back to Investor labeled 'Coupon $40' at years 1-5. Final large arrow labeled 'Principal $1000' at maturity. Highlight that total return exceeds purchase price."
-      }},
-      "math_context": "We established PV = CF/(1+r)^t and computed PV=680.58 for a single cash flow at r=8%."
+      }}
     }}
   ]
 }}

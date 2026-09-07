@@ -582,14 +582,13 @@ WORD-LEVEL TRANSCRIPT (ground-truth text with precise timestamps):
 REQUIREMENTS:
 1. The Scene class must be named `MathAnimation`
 2. Total animation duration must be {total_duration:.1f}s (sum of all run_time + wait calls)
-3. **Plan your animation**: Before writing code, think about what layout and visual approach will best serve this content. Consider the narration flow, the math steps, and what would be clearest for the viewer. Use `make_step_column()` for scrolling step regions.
-4. Read the word-level transcript carefully. Each step's animation should BEGIN when the narrator starts introducing that concept — find the words in the transcript that correspond to each step
-5. NEVER have dead time with just a title card — start showing content within the first 1-2 seconds
-6. Use the color scheme from the system prompt (dark bg, blue math, orange highlights, green answer)
-7. The final step/answer should remain visible until the end
-8. Use the `make_step_column()` factory from the system prompt for sequential derivation steps. For procedural steps, you can still use `add_step()` with Tex() labels instead of MathTex.
-9. **Graph drawing**: If the VISUAL DESCRIPTION mentions specific functions, graphs, curves, holes, asymptotes, or any plotted shapes, you MUST draw them on axes. Plot the actual functions described — don't skip them in favor of pure algebra. The graph is the visual payoff; the algebraic steps support it.
-10. Return ONLY the Python code, no explanation
+3. Read the word-level transcript carefully. Each step's animation should BEGIN when the narrator starts introducing that concept — find the words in the transcript that correspond to each step
+4. NEVER have dead time with just a title card — start showing content within the first 1-2 seconds
+5. Use the color scheme from the system prompt (dark bg, blue math, orange highlights, green answer)
+6. The final step/answer should remain visible until the end
+7. Use the `make_step_column()` factory from the system prompt for sequential derivation steps. For procedural steps, you can still use `add_step()` with Tex() labels instead of MathTex.
+8. **Graph drawing**: If the VISUAL DESCRIPTION mentions specific functions, graphs, curves, holes, asymptotes, or any plotted shapes, you MUST draw them on axes. Plot the actual functions described — don't skip them in favor of pure algebra. The graph is the visual payoff; the algebraic steps support it.
+9. Return ONLY the Python code, no explanation
 
 Return the complete Python code starting with `from manim import *`."""
 
@@ -714,15 +713,27 @@ def prepare_frame_code(
     source is an error.
 
     Returns (success, message, render_job_or_None). render_job is None when
-    the frame is skipped (mp4 exists) or on failure.
+    the frame is skipped (mp4 is up to date) or on failure.
     """
     frames_dir = os.path.join(video_folder, 'frames')
     audio_dir = os.path.join(video_folder, 'audio')
     output_path = os.path.join(frames_dir, f"frame_{frame_num}.mp4")
+    source_path = os.path.join(frames_dir, f"frame_{frame_num}_manim.py")
 
-    # Skip if already exists (unless force)
+    # Skip only if the mp4 exists AND is NEWER than its source (unless force).
+    # Existence alone is not enough: patching frame_N_manim.py after an animate
+    # pass and re-running `pipeline.py --from animate` used to keep the STALE
+    # mp4 and still print VIDEO COMPLETE, so the fix silently never shipped.
+    # Compare against the SOURCE only — never
+    # against the mp3, because fix_tts_sentence.py deliberately rewrites audio
+    # in place at the identical span and must NOT trigger a re-render.
     if os.path.exists(output_path) and not force:
-        return True, f"Frame {frame_num}: Skipped (frame_{frame_num}.mp4 exists)", None
+        if not os.path.exists(source_path):
+            return True, f"Frame {frame_num}: Skipped (frame_{frame_num}.mp4 exists, no source)", None
+        if os.path.getmtime(output_path) >= os.path.getmtime(source_path):
+            return True, f"Frame {frame_num}: Skipped (frame_{frame_num}.mp4 up to date)", None
+        print(f"    Frame {frame_num}: frame_{frame_num}_manim.py is NEWER than "
+              f"frame_{frame_num}.mp4 — re-rendering the stale frame")
 
     # Get frame data
     frame_info = math_data.get("frames", {}).get(str(frame_num), {})

@@ -363,6 +363,8 @@ _CHAPTER_HEADING = re.compile(r'^#\s+(?:Chapter\s+|Appendix\s+)?\d+[A-Za-z]?\b.*
                               re.MULTILINE)
 # Any numbered heading, at any depth ("## 5.3", "### 5.3.6").
 _NUMBERED_HEADING = re.compile(r'^#{1,4}\s+(\d+(?:\.\d+)+)\b.*$', re.MULTILINE)
+# Any heading at all, numbered or not - needed to clamp an excluded span.
+_ANY_HEADING = re.compile(r'^#{1,6}\s+\S.*$', re.MULTILINE)
 
 
 def slice_sections(md_text: str, sections: list[str], verbose: bool = False,
@@ -441,8 +443,19 @@ def _drop_subsections(text: str, exclude: list[str], verbose: bool = False) -> s
             missing.append(sec)
             continue
         depth = sec.count(".")
-        end = next((h.start() for h in heads
-                    if h.start() > m.start() and h.group(1).count(".") <= depth),
+        md_level = m.group(0).split()[0].count("#")
+        # The span ends at the next heading that is a sibling-or-shallower BY EITHER
+        # measure: numbering depth (## 19.6 ends ### 19.5.1) or raw markdown level.
+        # Numbered headings alone are not enough - an UNNUMBERED shallower heading
+        # ends the subsection too, and missing that let an exclude run to EOF and
+        # swallow the chapter Summary (excluding the last numbered subsection of a
+        # chapter once ate its "## Summary" and ~300 words with it).
+        end = next((h.start() for h in _ANY_HEADING.finditer(text)
+                    if h.start() > m.start()
+                    and (h.group(0).split()[0].count("#") <= md_level
+                         or (re.match(r'#{1,6}\s+(\d+(?:\.\d+)+)\b', h.group(0))
+                             and re.match(r'#{1,6}\s+(\d+(?:\.\d+)+)\b',
+                                          h.group(0)).group(1).count(".") <= depth))),
                    len(text))
         cuts.append((m.start(), end))
     if missing:
@@ -645,6 +658,14 @@ def compose_unit_source(book_dir: Path, sources: list[dict], verbose=False) -> s
         if src.get("drop_end_matter", True):
             md = drop_end_matter(md, verbose)
         if sections in ("all", None, "*"):
+            # "all" still has to honour `exclude`. It used to return `md` untouched,
+            # which silently shipped every excluded subsection into the unit: the
+            # exclude list only ever ran inside slice_sections. A unit that takes a
+            # whole chapter minus one subsection (where "all" is load-bearing because
+            # the chapter intro is unnumbered and
+            # slice_sections indexes numbered headings only) needs both.
+            if src.get("exclude"):
+                md = _drop_subsections(md, list(src["exclude"]), verbose)
             parts.append(md)
             if verbose:
                 print(f"      {label}: whole file ({len(md):,} chars)")

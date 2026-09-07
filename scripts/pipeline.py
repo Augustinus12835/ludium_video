@@ -62,6 +62,28 @@ VIDEO_STEPS = ["script", "verify_math", "tts", "animate", "compile", "subtitle"]
 # YOUTUBE SUPPORT
 # =============================================================================
 
+def probe_duration(video_path) -> Optional[float]:
+    """Return a video's duration in seconds, or None if it is not playable.
+
+    Existence and file size are NOT sufficient evidence that a compile finished.
+    A non-faststart mp4 gets its `moov` atom written LAST, so a file that is
+    still being written — or whose ffmpeg died partway — sits on disk at a
+    perfectly plausible size and fails to probe with "moov atom not found".
+    Seen in production: 11 MB on disk and unprobeable, then 13 MB and valid six
+    seconds later. Mtime-based freshness checks cannot
+    catch this either, because mtime updates on every write.
+    """
+    try:
+        out = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        return float(out.stdout.strip())
+    except (ValueError, subprocess.SubprocessError, OSError):
+        return None
+
+
 def is_youtube_url(url: str) -> bool:
     """Check if a string is a YouTube URL."""
     if not url:
@@ -499,9 +521,13 @@ def detect_video_state(video_dir: Path, math: bool = False, technical: bool = Fa
     state.script_exists = (video_dir / "script.json").exists() or (video_dir / "script.md").exists()
     state.math_verification_exists = (video_dir / "math_verification.json").exists()
 
-    # Check final video (with size validation)
+    # Check final video (existence + size + PLAYABILITY)
     final_video = video_dir / "final_video.mp4"
-    state.video_exists = final_video.exists() and final_video.stat().st_size > 1_000_000
+    state.video_exists = (
+        final_video.exists()
+        and final_video.stat().st_size > 1_000_000
+        and probe_duration(final_video) is not None
+    )
 
     # Extract video title (script.json preferred; legacy video_brief.md fallback)
     state.video_title = extract_video_title(video_dir)

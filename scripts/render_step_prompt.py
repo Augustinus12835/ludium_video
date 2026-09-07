@@ -19,15 +19,22 @@ Steps:
     segment               --content FILE
     script                --video-dir DIR --mode math|technical
     verify_math           --video-dir DIR --frame N [--prior-context FILE] [--sympy-error TEXT]
+    color_scheme          --pipeline-dir DIR (LECTURE-level semantic colour scheme, ONCE in
+                          Phase A after segment and BEFORE scripting; result → color_scheme.json.
+                          Injected as background into every script prompt and inherited by
+                          every video's color_plan)
     color_plan            --video-dir DIR   (video-level semantic color plan, AFTER all
-                          frames are verified; result goes top-level in math_verification.json)
-    sympy_gen             --video-dir DIR --frame N
+                          frames are verified; result goes top-level in math_verification.json.
+                          Inherits the lecture colour scheme when one is staged)
     manim                 --video-dir DIR --frame N --duration SEC --word-transcript FILE
                           [--prior-context FILE]
                           (omit --frame for a manifest of animatable frames;
                            --duration/--word-transcript auto-derive after tts)
 
-All STEP subcommands also accept --pretty to indent the JSON for inspection.
+All STEP subcommands also accept --pretty to indent the JSON for inspection, and
+--system-only / --user-only to split the output: the system half of a per-frame
+prompt (manim, verify_math) is identical for every frame of a video, so agents render
+it ONCE with --system-only and ask for the frame-specific {user, notes} with --user-only.
 """
 
 from __future__ import annotations
@@ -114,68 +121,6 @@ VISUAL CONTEXT:
 {visual_context}
 {prior_context_section}"""
 
-# SymPy verification code-gen prompt (this renderer is its single source).
-SYMPY_SYSTEM = """You write SymPy verification code for mathematical claims in educational content.
-
-Given a list of math steps from a calculus/linear algebra lecture, write a standalone Python script that:
-1. Imports sympy (and numpy only if needed for numerical checks)
-2. Encodes each verifiable math claim as an assertion
-3. Prints "PASS: [description]" for each assertion that holds
-4. Raises AssertionError with a clear message if any check fails
-
-WHAT TO VERIFY:
-- Arithmetic: evaluate expressions, check equalities (e.g., 16*8 == 128)
-- Algebra: simplifications, factoring, expanding (e.g., expand(expr) == expected)
-- Derivatives: diff(f, x) == expected_derivative
-- Integrals: integrate(f, x) == expected_antiderivative
-- Evaluations: expr.subs(x, val) == expected_value
-- Matrix operations: determinants, eigenvalues, inverses, rank
-- Equation solving: solve(eq, var) == expected_solutions
-- Point verification: substituting a point into an equation equals expected value
-
-WHAT TO SKIP (return None for these):
-- Purely procedural/conceptual steps with no math to verify
-- Steps that are just labels or descriptions
-- Steps where the "expression" is plain text (starts with \\text{})
-
-RULES:
-- Use sympy.Rational for fractions to avoid floating-point issues
-- Use sympy.symbols() for variables
-- Use sympy.Function('y')(x) for implicit functions when needed
-- For implicit differentiation: use idiff() or manually differentiate with y as Function
-- ALWAYS use symbolic equality: assert sp.simplify(a - b) == 0, not str(a) == str(b)
-  NEVER compare string representations — SymPy formatting varies (e.g., "3*(x - 1)*(x + 1)" vs "3(x-1)(x+1)")
-- For factoring checks: assert sp.simplify(sp.factor(expr) - expected) == 0
-- For absolute value equations, declare variables as real: symbols('x', real=True).
-  SymPy raises NotImplementedError on solve(Abs(x) - k, x) unless x is real.
-  Example: x = sp.symbols('x', real=True); assert set(sp.solve(sp.Abs(x) - 5, x)) == {-5, 5}
-- For log/exp cancellation identities (ln(e^u) = u, e^(ln u) = u, log(x*y) = log(x)+log(y)),
-  declare variables as real (and positive when inside ln): symbols('x', real=True) or
-  symbols('x', positive=True). Without real/positive assumptions, simplify(log(exp(x)) - x)
-  returns -x + log(exp(x)) (not 0) because the identity only holds on the principal branch.
-  Example: u = sp.symbols('u', real=True); assert sp.simplify(sp.log(sp.exp(u)) - u) == 0
-  For ln(x*y) = ln(x)+ln(y) style expansions, use positive=True and sp.expand_log(expr, force=True).
-- For fractional powers of negative numbers, SymPy returns complex principal roots:
-  (-1)**(Rational(1,3)) is NOT -1 in SymPy. Use sp.real_root(base, n) instead.
-  Example: sp.real_root(-8, 3) == -2, NOT (-8)**sp.Rational(1,3)
-  For cube roots specifically: sp.cbrt(x) gives real cube root.
-  When evaluating f(x) at negative x with fractional exponents, substitute THEN simplify with real_root.
-- Each assertion must have a descriptive message
-- Keep the code simple and focused — no classes, no fancy structure
-- If NO steps have verifiable math, respond with exactly: NONE
-
-Respond with ONLY the Python code (no markdown fences, no explanation), or the word NONE."""
-
-SYMPY_USER_TEMPLATE = """Write SymPy verification code for these math steps.
-
-NARRATION CONTEXT:
-{narration}
-
-MATH STEPS:
-{steps_text}
-
-Write the verification code, or respond with NONE if there's no verifiable math."""
-
 MANIM_USER_NOTE = (
     "The user prompt below is the Manim code-generation prompt exactly as "
     "generate_math_animation.py would send it. The system prompt is the "
@@ -194,8 +139,20 @@ MANIM_USER_NOTE = (
 _REAL_STDOUT = sys.stdout
 
 
+# Output-shape control, set by main() from --user-only / --system-only. The system
+# half of a per-frame codegen prompt is identical for every frame of a video (~90 KB
+# for Manim), so agents render it ONCE with --system-only and then request only the
+# frame-specific half with --user-only.
+_EMIT_OPTS = {"user_only": False, "system_only": False}
+
+
 def emit(system: str, user: str, notes: str = "", pretty: bool = False) -> None:
-    payload = {"system": system, "user": user, "notes": notes}
+    if _EMIT_OPTS["system_only"]:
+        payload = {"system": system}
+    elif _EMIT_OPTS["user_only"]:
+        payload = {"user": user, "notes": notes}
+    else:
+        payload = {"system": system, "user": user, "notes": notes}
     if pretty:
         json.dump(payload, _REAL_STDOUT, indent=2, ensure_ascii=False)
     else:
@@ -301,6 +258,107 @@ def load_reference_notes(pipeline_dir: Path) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+COLOR_SCHEME_FILENAME = "color_scheme.json"
+
+COLOR_SCHEME_SCRIPT_BLOCK = """
+
+---
+
+LECTURE COLOUR SCHEME (background — already decided for the whole lecture; you do not
+choose colours and you do not need to restate them):
+
+{scheme}
+
+This is context, not a task. Every video in this lecture paints these quantities in these
+colours, and the frame-authoring agent applies them automatically from the plan — so:
+- Write `visual` descriptions in terms of the QUANTITY ("the slope", "the step size"),
+  not a colour word. The colour follows the quantity by itself.
+- Name a colour only where the frame's meaning genuinely depends on one (a red warning, a
+  gold boxed result, "the two curves must be visually distinct") — and when you do, use a
+  colour this scheme has NOT already committed to another quantity.
+- If your video introduces a recurring quantity the scheme does not list, describe it and
+  leave the colour unstated; the plan step will assign one.
+"""
+
+COLOR_SCHEME_PLAN_BLOCK = """
+
+---
+
+LECTURE COLOUR SCHEME — ALREADY DECIDED, INHERIT IT. This lecture's scheme was authored
+once for all its videos and is binding:
+
+{scheme}
+
+Your job is NOT to invent a plan. Copy every scheme entry whose quantity actually appears
+in THIS video's steps, keeping its colour EXACTLY as given, and extending its `tex` list
+with any additional LaTeX forms this video happens to use. Then, and only then, add plan
+entries for quantities that are genuinely local to this video, choosing colours the scheme
+has not already used. Never re-assign a scheme colour to a different quantity, and never
+give a scheme quantity a different colour.
+"""
+
+
+def load_color_scheme(pipeline_dir: Path) -> dict:
+    """Return the lecture-level colour scheme dict, or {} when none is staged."""
+    path = Path(pipeline_dir) / COLOR_SCHEME_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    # Tolerate a wrapper: {"color_scheme": {...}, "_note": "..."}.
+    inner = data.get("color_scheme") if isinstance(data.get("color_scheme"), dict) else data
+    scheme = {k: v for k, v in inner.items() if not k.startswith("_")}
+    _warn_bad_scheme_colors(scheme, path)
+    return scheme
+
+
+def _warn_bad_scheme_colors(scheme: dict, path: Path) -> None:
+    """Warn on stderr about colour names Manim will not resolve, and on reuse.
+
+    A typo'd constant does not fail here — it fails deep in a 4K render, long
+    after the scheme has been injected into every script prompt in the lecture.
+    Checked against the real Manim namespace, so any genuine constant passes.
+    """
+    try:
+        import manim  # noqa: PLC0415 — optional at prompt-render time
+    except Exception:
+        return
+    seen: dict = {}
+    for name, spec in scheme.items():
+        color = (spec or {}).get("color")
+        if not color:
+            print(f"  [color_scheme] WARNING: {name!r} has no `color` ({path})", file=sys.stderr)
+            continue
+        if not isinstance(color, str) or not hasattr(manim, color):
+            print(f"  [color_scheme] WARNING: {name!r} → {color!r} is not a Manim colour "
+                  f"constant; the render will fail ({path})", file=sys.stderr)
+        elif color in ("WHITE", "YELLOW"):
+            print(f"  [color_scheme] WARNING: {name!r} → {color} is reserved for default "
+                  f"step/note text ({path})", file=sys.stderr)
+        if color in seen:
+            print(f"  [color_scheme] WARNING: {color} assigned to both {seen[color]!r} and "
+                  f"{name!r} — one colour must mean one quantity ({path})", file=sys.stderr)
+        else:
+            seen[color] = name
+
+
+def format_color_scheme(scheme: dict) -> str:
+    """Render the scheme as the human-readable lines both prompt blocks embed."""
+    lines = []
+    for name, spec in scheme.items():
+        spec = spec or {}
+        tex = ", ".join(f"`{t}`" for t in spec.get("tex", []))
+        words = ", ".join(f'"{w}"' for w in spec.get("note_words", []))
+        lines.append(f"- {name} → {spec.get('color', '?')} — tex forms: {tex or '(none)'};"
+                     f" note words: {words or '(none)'}")
+    return "\n".join(lines)
+
+
+
 # -----------------------------------------------------------------------------
 # Step handlers
 # -----------------------------------------------------------------------------
@@ -384,6 +442,11 @@ def step_script(args: argparse.Namespace) -> None:
     ref = load_reference_notes(pipeline_dir)
     if ref:
         user += REFERENCE_NOTES_SCRIPT_BLOCK.format(notes=ref)
+    # Lecture-level colour scheme, when staged (Phase A `color_scheme` step).
+    # Background only — the script author writes in quantities, not colour words.
+    scheme = load_color_scheme(pipeline_dir)
+    if scheme:
+        user += COLOR_SCHEME_SCRIPT_BLOCK.format(scheme=format_color_scheme(scheme))
 
     system = SCRIPT_SYSTEMS[mode]
     notes = (
@@ -396,6 +459,9 @@ def step_script(args: argparse.Namespace) -> None:
     if ref:
         notes += (f" reference_notes={pipeline_dir / REFERENCE_NOTES_FILENAME} injected "
                   "(official notes — on-screen formulas must match their form).")
+    if scheme:
+        notes += (f" color_scheme={pipeline_dir / COLOR_SCHEME_FILENAME} injected as BACKGROUND "
+                  f"({len(scheme)} quantities) — write `visual` in quantities, not colour words.")
     emit(system, user, notes, pretty=args.pretty)
 
 
@@ -480,7 +546,7 @@ def step_verify_math(args: argparse.Namespace) -> None:
         prior_context_section=prior_context_section,
     )
     notes = (
-        "Subagent MUST run with adaptive thinking in mind — respond with ONLY valid JSON. "
+        "Write ONLY valid JSON. "
         "The subagent runs SymPy ITSELF to confirm every step and the final answer (write a "
         "temp .py and execute it with venv/bin/python); that execution IS the verification — "
         "there is no separate sympy_gen step and no sympy_verified gate. "
@@ -509,6 +575,91 @@ def step_verify_math(args: argparse.Namespace) -> None:
     emit(VERIFY_MATH_SYSTEM, user, notes, pretty=args.pretty)
 
 
+COLOR_SCHEME_SYSTEM = """You design the LECTURE-WIDE semantic colour scheme for a course \
+lecture that has been split into several Manim-rendered videos.
+
+Downstream, every frame colours recurring quantities so a student can match a mark on a graph \
+to the symbol in the algebra and to the word in a margin note without reading letters. Your \
+scheme is what keeps those colours consistent across the WHOLE LECTURE — one quantity = one \
+colour, in every video, for hours of viewing. It is decided ONCE, before any script is \
+written, and every later stage inherits it.
+
+You receive the lecture title and, per video, its title and the concepts/examples it covers. \
+You are choosing from the lecture's SUBJECT MATTER, before any frame exists — so pick the \
+quantities the lecture keeps coming back to, not incidental ones.
+
+Selection rules:
+- Pick 3-7 quantities that RECUR ACROSS VIDEOS. A quantity confined to one video does not \
+belong here — that video's own colour_plan step will handle it. Prefer the lecture's running \
+symbols (the ones in its central recurrence, equation, or worked example), quantities that get \
+DRAWN (a curve, a strut, an axis, a region), and confusable pairs that must stay separable.
+- Colours come from exactly this palette (Manim constant names): BLUE, ORANGE, TEAL, PURPLE, \
+PINK, RED_C, GREEN — in roughly that order of preference. GREEN doubles as the final-answer \
+accent and RED_C as the error/warning accent, so reach for them last, or when the meaning \
+genuinely matches (RED_C for a divergence/warning, GREEN for a result).
+- One quantity per colour, and never re-use a colour. Never WHITE or YELLOW (reserved for \
+default step and note text). Leave at least one of GREEN/RED_C unassigned when you can, so \
+frames keep a free accent.
+- Beware near-duplicates that differ only by case or a subscript (an error constant C vs a \
+constant of integration c): if the lecture uses both, they MUST get different colours, and \
+say so in the entry's note_words.
+- "tex" lists the EXACT LaTeX forms of the quantity, including every variant the lecture uses \
+(e.g. "A_n", "A_0", "A_1"). These become substring keys for tex_to_color_map, so each must be \
+a free-standing symbol, not a fragment. A quantity that only ever occurs brace-nested (inside \
+\\\\frac{}{}, \\\\sqrt{}, ^{} or _{}) cannot be linked anywhere — do not plan a colour for it.
+- "note_words" lists the plain-English words the narration and notes use to name it \
+("the slope", "step size"). Lowercase, 1-3 words; prefer phrases over bare single letters.
+- "scope" is a one-line note on where it appears (e.g. "videos 1-5, the Euler recurrence").
+
+Respond with ONLY valid JSON, no other text:
+{
+    "<short-quantity-name>": {
+        "color": "TEAL",
+        "tex": ["A_n", "A_0"],
+        "note_words": ["the slope", "euler slope"],
+        "scope": "videos 1-6: the slope each step is taken along"
+    }
+}"""
+
+
+def step_color_scheme(args: argparse.Namespace) -> None:
+    """Lecture-level semantic colour scheme prompt (math/technical).
+
+    Run ONCE per lecture in Phase A, after segment and BEFORE any script is
+    authored — the script agent receives the result as background so its
+    `visual` descriptions are written in quantities rather than colour words,
+    and every video's colour_plan step inherits it verbatim.
+    """
+    pipeline_dir = Path(args.pipeline_dir)
+    seg_path = pipeline_dir / "segments.json"
+    if not seg_path.exists():
+        raise SystemExit(f"{seg_path} missing — run the segment step first")
+    seg = json.loads(seg_path.read_text(encoding="utf-8"))
+    videos = seg.get("videos", [])
+    lines = [f"LECTURE: {pipeline_dir.name}", f"{len(videos)} videos:", ""]
+    for i, v in enumerate(videos, 1):
+        lines.append(f"Video {i}: {v.get('title', '(untitled)')}")
+        if v.get("core_concept"):
+            lines.append(f"  core: {v['core_concept']}")
+        for key in ("key_concepts", "examples", "key_takeaways"):
+            for item in (v.get(key) or [])[:4]:
+                lines.append(f"  - {item}")
+        lines.append("")
+    user = ("Design the lecture-wide semantic colour scheme for the lecture below.\n\n"
+            + "\n".join(lines))
+    out = pipeline_dir / COLOR_SCHEME_FILENAME
+    notes = (
+        "Math/technical only, ONCE PER LECTURE, in Phase A after segment and BEFORE any "
+        "script is authored. Subagent responds with ONLY the JSON scheme "
+        "({name: {color, tex, note_words, scope}}). Save it verbatim to "
+        f"{out}. From then on `render_step_prompt.py script` injects it as BACKGROUND for "
+        "the script author (so `visual` text names quantities, not colours) and "
+        "`render_step_prompt.py color_plan` injects it as a BINDING inheritance for every "
+        "video's plan."
+    )
+    emit(COLOR_SCHEME_SYSTEM, user, notes, pretty=args.pretty)
+
+
 def step_color_plan(args: argparse.Namespace) -> None:
     """Video-level semantic color plan prompt (math/technical).
 
@@ -525,6 +676,11 @@ def step_color_plan(args: argparse.Namespace) -> None:
     if user is None:
         raise SystemExit(
             "No frame carries math/code steps — nothing to plan (skip this step).")
+    # A lecture-level scheme, when staged, is BINDING: this step inherits it and
+    # only extends it, so a quantity keeps one colour across every video.
+    scheme = load_color_scheme(video_dir.parent)
+    if scheme:
+        user += COLOR_SCHEME_PLAN_BLOCK.format(scheme=format_color_scheme(scheme))
     notes = (
         "Math/technical only. Subagent responds with ONLY the JSON plan "
         "({name: {color, tex, note_words}}, or {} if nothing recurs). Insert the result "
@@ -534,45 +690,11 @@ def step_color_plan(args: argparse.Namespace) -> None:
         "\"from scripts.generate_math_animation import check_color_links; "
         f"check_color_links('{video_dir}')\"."
     )
+    if scheme:
+        notes += (f" LECTURE COLOUR SCHEME {video_dir.parent / COLOR_SCHEME_FILENAME} injected "
+                  f"({len(scheme)} quantities) — INHERIT those colours verbatim; add only "
+                  "video-local quantities, in colours the scheme has not used.")
     emit(COLOR_PLAN_SYSTEM, user, notes, pretty=args.pretty)
-
-
-def step_sympy_gen(args: argparse.Namespace) -> None:
-    video_dir = Path(args.video_dir)
-    mv_path = video_dir / "math_verification.json"
-    if not mv_path.exists():
-        raise SystemExit(f"{mv_path} does not exist yet")
-    mv = json.loads(mv_path.read_text(encoding="utf-8"))
-    entry = mv.get("frames", {}).get(str(args.frame))
-    if not entry:
-        raise SystemExit(f"No frame {args.frame} in math_verification.json")
-
-    math_steps = entry.get("math_steps", [])
-    narration = entry.get("natural_narration") or entry.get("original_narration", "")
-    if not narration:
-        script_frame = load_script(video_dir).get_frame(args.frame)
-        narration = script_frame.narration if script_frame else ""
-
-    steps_text = ""
-    for step in math_steps:
-        steps_text += (
-            f"Step {step.get('step', '?')}: {step.get('expression', '')}\n"
-            f"  Operation: {step.get('operation', '')}\n"
-            f"  Note: {step.get('note', '')}\n\n"
-        )
-
-    user = SYMPY_USER_TEMPLATE.format(
-        narration=narration[:2000],
-        steps_text=steps_text,
-    )
-    notes = (
-        "Subagent responds with ONLY Python code (no fences) OR the word NONE. "
-        "If NONE, set sympy_verified=null and move on. "
-        "Otherwise, write the code to a temp file, run with `python <tmp>.py`, "
-        "capture stdout/stderr. Timeout 30s. "
-        "If it passes: set sympy_verified=true. If it fails: retry verify_math with --sympy-error."
-    )
-    emit(SYMPY_SYSTEM, user, notes, pretty=args.pretty)
 
 
 def step_manim(args: argparse.Namespace) -> None:
@@ -698,6 +820,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_common(sp: argparse.ArgumentParser) -> None:
         sp.add_argument("--pretty", action="store_true", help="Pretty-print JSON output")
+        g = sp.add_mutually_exclusive_group()
+        g.add_argument("--system-only", action="store_true",
+                       help="Emit only {system} — identical for every frame of a video; "
+                            "render it once")
+        g.add_argument("--user-only", action="store_true",
+                       help="Emit only {user, notes} — the frame-specific half; pair with "
+                            "one --system-only render per video")
 
     sp = sub.add_parser("clean", help="clean_transcript.py prompt")
     sp.add_argument("--transcript", required=True, help="Path to transcript.json or plain-text file")
@@ -724,17 +853,18 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=step_verify_math)
 
+    sp = sub.add_parser("color_scheme", help="LECTURE-level semantic colour scheme prompt "
+                        "(run ONCE in Phase A after segment, before scripting)")
+    sp.add_argument("--pipeline-dir", required=True)
+    add_common(sp)
+    sp.set_defaults(func=step_color_scheme)
+
     sp = sub.add_parser("color_plan", help="Video-level semantic color plan prompt "
-                        "(math/technical; run after all frames are verified)")
+                        "(run after all frames are verified; inherits the lecture "
+                        "colour scheme when one is staged)")
     sp.add_argument("--video-dir", required=True)
     add_common(sp)
     sp.set_defaults(func=step_color_plan)
-
-    sp = sub.add_parser("sympy_gen", help="SymPy verification code-gen prompt for one frame")
-    sp.add_argument("--video-dir", required=True)
-    sp.add_argument("--frame", type=int, required=True)
-    add_common(sp)
-    sp.set_defaults(func=step_sympy_gen)
 
     sp = sub.add_parser(
         "manim",
@@ -759,6 +889,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    _EMIT_OPTS["user_only"] = bool(getattr(args, "user_only", False))
+    _EMIT_OPTS["system_only"] = bool(getattr(args, "system_only", False))
     # Send any stray prints from imported helpers to stderr; JSON goes to
     # _REAL_STDOUT (kept above). One-shot CLI — no need to restore.
     sys.stdout = sys.stderr

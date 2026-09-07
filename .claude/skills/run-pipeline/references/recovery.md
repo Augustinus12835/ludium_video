@@ -10,7 +10,7 @@ Symptoms: `FAIL: Manim render failed`, LaTeX errors, `cannot import name`, an
 `AttributeError` traceback naming `frame_<N>_manim.py`.
 
 Read the frame's `.py` and the error tail; diagnose with `templates/manim_system_prompt.md`
-(rules 36–66 are the silent-defect catalogue). Recurring culprits: unbalanced `{}` in
+(rules 36–73 are the silent-defect catalogue). Recurring culprits: unbalanced `{}` in
 `MathTex`; a `t2c` key inside ANY macro brace — `\frac`, `\int_{}`, `^{}`, `\text{}`, even a
 bare `\mathrm{Var}(…)` (`Missing } inserted`); `\cancel`/`\ding`/other non-amsmath macros
 (delete the call — a "fallback" reassignment after it is dead code); bare `^`/`\sin` in a
