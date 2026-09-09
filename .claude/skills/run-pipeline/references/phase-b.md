@@ -44,6 +44,25 @@ result, "the two curves must read as distinct") and only in a colour the scheme 
 committed elsewhere. Hard-coding your own colour words makes the script fight the
 producer's plan.
 
+**The `visual` is a shot description, not a build spec.** You are the director: say WHAT is
+on screen, roughly WHERE (left / right / top band / a two-column split), WHEN each thing
+appears (the `On "…"` cue phrase — verbatim, occurring exactly once in the narration) and what
+CHANGES (grows, is struck through, slides into the left panel). Roughly 400–900 characters per
+frame; a worked-example frame may run longer. It never contains canvas coordinates, measured
+widths ("measured 7.165u at 1.0; show 1.15 -> 8.24u"), `scale` values, Manim class or method
+names (`Tex`, `Ellipse`, `set_stroke`, `Indicate`), arc angles, or any restatement of the Manim
+rules. The codegen system prompt owns every one of those, and a rules block copied into the
+script drifts from it — one shipped copy banned `tex_to_color_map` and `Indicate(color=)`,
+both of which the real system prompt uses in its own examples — and is then handed to the
+producer once per frame next to the authoritative version. Fit is not yours either: write
+"must fit the right column" or "break the long line after the equals sign", and the producer
+measures the actual mobject (Stage 2 step 4). On one production video the `visual` was 87 % of
+`script.json` (63 k of 73 k chars); the author measured 108 labels in Manim, the reviewer
+measured them again, and the producer — the only one holding the code the number applies to —
+measured them a third time, while sibling videos on the identical prompt ran at a quarter of
+the size with nothing lost. Detail belongs in the narration and in the cue phrases; everything
+else in the reference is cost, not direction.
+
 Report to the orchestrator once the script is written. Review issues (below) come back to
 you via `SendMessage`; apply every script-content fix yourself — you are the sole author of
 `script.json`. After any narration change, recompute `word_count`/`timing`/`metadata.*` and
@@ -90,9 +109,36 @@ frame's narration (a later cue containing an earlier one as a substring misfires
 terminal reveal has margin before the narration end (script seconds run 5–10 % long against
 real TTS and compile trims anything past the audio); quoted on-screen note strings compile
 (bare `^`, `_`, `\sin` outside `$…$` in a `Tex` note crash, `$` inside a `MathTex` spec crashes
-the other way); no raw Unicode math glyphs (`×`, `⋯`, `→`) in strings bound for MathTex; any
-`scale_to_fit_width` instruction is conditional ("if wider than 12.5 u") with one shared scale
-per stack.
+the other way); no raw Unicode math glyphs (`×`, `⋯`, `→`) in strings bound for MathTex.
+
+**Fit findings go to the AUTHOR as direction and to the PRODUCER as numbers.** The reviewer's
+own width simulation (item 1 above) decides whether a line fits its column. When one does not,
+the fix is directorial and the author makes it — an explicit line break, a two-line form, one
+fewer column — reported as "step 4 is ~15 u at the stack's scale; break after the equals sign".
+It is never a measured width for the author to transcribe into the `visual`: the number only
+means something against the actual mobject, which exists in Stage 2. The producer re-measures
+every long expression in code and applies the fit unconditionally, one shared scale per stack
+(step 4's width probe; system-prompt rules 36–39). History, so the lesson survives: this file
+once required the `scale_to_fit_width` instruction to be *conditional*, and a 1.6 u overflow
+shipped when codegen eyeballed it; requiring the AUTHOR to state measured widths instead
+produced, within two days, scripts carrying 60–108 Manim-measured labels each plus an
+1,800-char rules block on every frame. Both put the number in the wrong layer. The
+`0.222 × chars + 2.2` formula **under**-estimates at `font_size=32` in six of seven recorded
+cases, by up to 1.29 u, so it is only ever a trigger to go and measure — in Stage 2.
+
+**Scope gate on `visual.reference`.** Flag any frame whose reference contains a measured width,
+a canvas coordinate, a `scale` value, a Manim class or method name, a `CLASS RULES`-style
+block, or runs past ~1,200 characters (worked-example frames excepted). The fix is to cut it
+back to what / where / on-which-phrase — never to pad the other frames up to match. Cheap
+detector:
+
+```python
+import json, re
+for f in json.load(open("script.json"))["frames"]:
+    r = f["visual"]["reference"]
+    hits = re.findall(r"measured [\d.]+u|CLASS RULES|\b(?:Tex|MathTex|Ellipse|VGroup|set_stroke|Indicate)\(|\(-?\d\.\d, -?\d\.\d\)", r)
+    if hits or len(r) > 1200: print(f["number"], len(r), hits[:4])
+```
 
 **Cross-video duplication (every multi-video lecture).** The dominant defect on an 8-video
 lecture was repetition BETWEEN videos: each script agent re-establishes context at the top of
@@ -103,6 +149,16 @@ substantially repeat a sibling frame, and any material belonging to the sibling'
 n-gram overlap against all earlier siblings separates real repetition from boilerplate. A
 script's own claim that it is "deliberately different from the previous video" is not
 evidence.
+
+**Mannered prose is a defect, not a taste question.** Check the narration for metaphor and
+flourish standing in for direct statement — "a dial worth turning" for "a parameter worth
+varying", "earns its keep" for "still matters". Two tests that separate decoration from a
+working analogy: (1) is a literal phrase available and shorter? then use it; (2) do the
+metaphor's connotations assert mechanics the code does not have? "the parent hands the method
+down" implies a copy is transferred and is simply false about attribute lookup. Narration is
+heard once and cannot be re-read, so a figure a reader would decode in a beat is a sentence the
+listener loses. Report the location and why the literal statement is better, and let the AUTHOR
+rewrite — per the rule immediately below.
 
 **Wording nits are claims, not corrections.** The reviewer verifies the author's maths with
 SymPy but its own suggested prose is unverified; a nit that adds an explanatory aside ("by
@@ -119,6 +175,22 @@ fix only the script and leave the source files alone. If the claim lives only in
 Takeaways** bullet of `segments.json` / `content.txt`, it is OUR machine-authored artifact
 (it has invented a polynomial the lecture never states) — fix `segments.json` + every
 `Video-N/content.txt` copy, not `content_cleaned.txt`.
+
+**Cross-LECTURE claims must be checked against the PRIOR LECTURE'S SOURCE, not from memory.**
+In a sequential course, script agents reach back to the previous lecture for continuity — and
+they get it wrong in two distinct ways, both seen on one programming lecture:
+- **Re-teaching it.** One video's opening frame reproduced an *already-published* video from two
+  lectures earlier (same beats, same illustration, no back-pointer), burning 12 % of its runtime
+  telling the viewer something they had been told twice. Only found because the reviewer went and
+  read the earlier lecture.
+- **Inverting it.** Another video's continuity beat said an earlier class "called the parent's
+  `__init__` by name" — but that class is precisely the one with NO `__init__`, the subject of an
+  earlier video; a sibling class makes that call. A viewer who watched the prior lecture hears
+  the new one contradict it.
+Neither is detectable from the current lecture's own files. So when a course has predecessors,
+hand the reviewer the prior lecture's source code / notes **and** its `segments.json`, and
+require every cross-lecture assertion to be grounded in one of them — video titles alone are
+often enough to catch an inversion.
 
 ### Stage 1 return
 
@@ -175,6 +247,21 @@ entries for genuinely video-local quantities — in colours the scheme has not u
 re-colour a scheme quantity and never re-use a scheme colour for something else: that is
 precisely the cross-video drift the scheme exists to stop (one quantity teal in Video-1 and
 gold in Video-2 while every video's own lint passed).
+
+⚠️ **A quantity that RECURS across videos but was left OUT of the scheme will drift — and the
+selection rules actively push such quantities out.** The scheme caps at 3-7 entries and asks you
+to keep GREEN/RED_C free, so a genuinely recurring quantity can lose its slot to those
+constraints. On one nine-video lecture a per-kilometre rate was deliberately excluded to keep
+RED_C free as the lecture's error accent; it then appeared in **four of nine videos**, and their
+producers independently chose SAND (three of them) and GOLD (one) — the exact per-video drift
+the scheme exists to stop, arrived at by following the scheme's own rules. (That pair was
+near-identical in practice — delta (26,5,11) in RGB, indistinguishable as text — so it did not
+warrant re-rendering a shipped video, but the mechanism will not always be so forgiving.)
+
+**So: count a candidate's videos before dropping it.** If a quantity appears in ≥3 videos, it
+belongs in the lecture scheme even if that means spending GREEN or RED_C, or exceeding seven
+entries. If you must leave one out, name it in the scheme's `scope` text **with the colour every
+video must give it**, so the constraint travels with the plan instead of being rediscovered.
 
 Two things still on you, because the scheme cannot know them:
 - **A colour must mean one thing at a time on screen.** A quantity outside the scheme may
@@ -248,8 +335,13 @@ SUCCESS:**
   `Line`, `Axes` bbox vs stroke, 4 bezier points, `sys.exit(0)` on import…). A collision
   audit needs three comparison classes — canvas edge, label × label, label × DRAWN GEOMETRY
   (polylines, dots, axes) — one class alone reports clean over the others' defects.
-- **Width/height probe** — print `.width`/`.height` of every long expression against 13.0 u
-  (safe) / the column width; fix by explicit breaks, not scale.
+- **Width/height probe — yours, not the script's.** Print `.width`/`.height` of every long
+  expression and every label row against 13.0 u (safe) / the column width BEFORE placing
+  anything, then apply the fit in code from the measured number, unconditionally, one shared
+  scale per stack (rules 36–39). A line over by more than ~10 % is fixed by an explicit break,
+  not by scale. The script's `visual` carries no widths, coordinates or scales by design
+  (Stage 1 §1); if one does, ignore the number and measure — it was taken on a mobject that did
+  not exist yet. A 1.6 u overflow once shipped when fit was left to eyeballing.
 - **t2c glyph-count diff** — beyond `lint_manim_t2c.py`, compare the glyph count of the plain
   vs coloured `MathTex` for every `tex_to_color_map` expression (probe the mobject AWAY from
   the origin). Identical width + passing dry run + a dropped subscript is real.

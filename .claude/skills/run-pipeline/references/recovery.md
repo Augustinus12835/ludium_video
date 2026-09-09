@@ -82,6 +82,17 @@ Bash tool's 10-min cap (`timeout` silently clamps at 600000 ms) — background i
 - A Monitor whose liveness check is `pgrep -f "<pattern>"` matches its OWN command line if
   the pattern appears in the script — it stays true forever. Check the artifact instead
   (`[ -f final_video.mp4 ]`) or use a pattern that cannot appear in your script.
+- ⚠️ **The same self-match bites through `pkill`, where it is DESTRUCTIVE.** A producer once
+  ran `pkill -f "<task-id>"` to clean up its own jobs; its own shell's command line contained
+  that task-id, so **it killed itself**. Two watchers in the same run self-matched the same
+  way, and a plain `pgrep -af "manim render"` reported 2 processes when the true answer was
+  **0** — both hits were the querying shell. Safe forms: kill by a **PID captured at launch**, or
+  scope the pattern to a path only your process owns (`pkill -f /tmp/<your-scratch-dir>/`); to
+  count or wait, read `/proc/*/cmdline` and skip the reader.
+- **NEVER broad-kill Manim** (`pkill -f "manim render"`): sibling producers share the machine and
+  a pattern kill takes out every other video's renders, which the victims discover much later as
+  a missing or stale mp4. Check `pgrep -af manim` (allowing for the self-match above) to see
+  whose renders are live before killing anything.
 
 ## TTS narration check (halts the tts step before audio)
 
@@ -138,6 +149,35 @@ after tts so the animation re-aligns (see CLAUDE.md "Fixing TTS / Narration").
 ElevenLabs 429 / overloaded: wait 60s, resume; again → 5 min; third time → surface the
 status to the user. Network blips (`ConnectionResetError`, `ReadTimeout`): retry
 immediately. ElevenLabs `quota_exceeded` is a hard wall — surface it.
+
+## Session rate limit kills EVERY agent at once (orchestrator)
+
+`You've hit your session limit · resets <time>` (429) is not per-agent — it terminates every
+subagent in the session simultaneously, mid-step, and the orchestrator cannot spawn until reset.
+It has happened twice on this pipeline, both times with **nine concurrent agents**. Treat nine
+as the empirical ceiling and prefer finishing videos over starting them: relaunch in batches of
+~4, furthest-along first, so capacity frees up as they complete.
+
+**The damage is never the disk — it is the findings held only in the orchestrator's context.**
+Every agent writes its artifacts before reporting, so `script.json`, audio and renders survive
+intact (verify: no zero-byte files, all JSON parses, no mp4 older than its source). What dies is
+any review that has been *reported to you but not yet applied by its author*. In one case two
+complete reviews were in that state; in another, four findings were lost outright because
+nobody wrote them down.
+
+**So, in this order, the moment a kill notification arrives:**
+1. **Audit the disk** — zero-byte files, JSON validity, and `mp4 mtime > source mtime` for every
+   rendered frame. Do this first; it is cheap and it tells you whether anything needs redoing.
+2. **Persist every finding that exists only in your context** to a file the resumed agent will
+   read — `pipeline/<L>/Video-N/REVIEW_ROUND1.md` is the convention. Do it before writing
+   anything else. A review you merely *relayed* counts as unpersisted: check the target's
+   `script.json` mtime against when you sent it, because an agent killed before its next tool
+   call applied none of it.
+3. **Update `RESUME.md`** with per-video state, what is already paid for (TTS especially — never
+   re-run it), and what each video needs next.
+
+**Write `RESUME.md` pre-emptively, while things are healthy** — not after the kill. When it
+already existed before the limit hit, the restart was a lookup rather than a reconstruction.
 
 ## Producer looks dead (orchestrator)
 

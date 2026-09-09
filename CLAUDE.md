@@ -77,7 +77,10 @@ flag explicitly.
   steps only (its `natural_narration` TTS rewrite was retired 2026-08-30) —
   so the math script prompt injects `MATH_NARRATION_TTS_RULES`
   (scripts/utils/tts_rules.py) to make narration TTS-safe at script time.
-  Manim animates every frame.
+  Manim animates every frame. The script's `visual` is a shot description —
+  what, roughly where, and on which narration phrase (~400–900 chars) — never
+  coordinates, measured widths, scales or Manim API: codegen measures and owns
+  those.
 - **Technical** (`--technical`) — math + diagrams + code (finance, CS,
   engineering, physics). Frame classes are `math`/`code`/`visual`: math frames
   get `math_steps` + SymPy, code frames get `code_steps` (traced execution) and

@@ -100,8 +100,21 @@ and PPTX sources arrive with `content_cleaned.txt` — start at segment.
    coverage — a clean subagent can silently drop the tail. Verify: (a) the last ~400 words
    of source and of `content_cleaned.txt` reach the same closing material; (b) `wc -w`
    both — cleaned text lands at ~55–70% of source; below ~45% or a chunk-sized hole means a
-   dropped span, not aggressive editing; (c) every chunk `0..N-1` made it into the join.
-   Re-clean any missing span before proceeding. Applies to every source type.
+   dropped span, not aggressive editing; (c) every chunk `0..N-1` made it into the join;
+   **(d) every chunk SEAM joins grammatically** — a-c all pass while a sentence is torn in
+   half at a boundary, because each chunk agent assumes the other wrote the missing part. On
+   one lecture the join read "…float ```\n\nof hours, colon, number of minutes, colon, number
+   of seconds." — the head of that sentence was written by neither chunk, and it survived into
+   `content.txt` and `segments.json` before a script reviewer caught it. Cheap sweep: flag
+   every paragraph opening lowercase or mid-clause —
+   ```python
+   for i, para in enumerate(text.split("\n\n")):        # skip fenced blocks and md markers
+       w = para.strip().split()[:1]
+       if w and w[0][0].islower() and w[0] not in ("a", "an", "the"): print(i, para[:90])
+   ```
+   Most hits are legitimate prose continuing around a code block (10 of 11 were, on that
+   lecture), so read each one — but a genuine tear is unmistakable. Re-clean any missing span
+   before proceeding. Applies to every source type.
 4. **segment** — very short content (a single self-contained chapter or question) can skip
    straight to `segment_concepts.py pipeline/<L> --single-video`. Otherwise:
    `render_step_prompt.py segment --content pipeline/<L>/content_cleaned.txt` → one
@@ -142,6 +155,33 @@ B1 is a **conversation with one scripting agent**, not a fire-and-forget spawn:
 3. On pass: B1 is done. Spawn the Stage-2 producer to finish the video (verification,
    codegen, render, compile, subtitle, audit). Track which `agentId` owns which video at
    spawn time.
+
+**Give every Stage-1 agent this narration-style rule.** Mannered prose substitutes metaphor
+and flourish for direct statement. Instead of "a parameter worth varying" the mannered writer
+produces "a dial worth turning"; instead of "this point still matters", "this point earns its
+keep". The phrases exist to display the writer, not to convey the idea, and readers can tell —
+which is why mannered prose irritates: it makes the reader work harder so the writer can
+perform. It is also imprecise, because metaphors drag in connotations the writer did not choose
+and cannot control. **The fix is to say what you mean; when a literal phrase is available, use
+it.**
+
+Two reasons this bites harder here than in ordinary writing:
+- **Narration is heard once, not read.** A viewer cannot re-read a clause to work out which
+  half was literal. A figure of speech that a reader would decode in a beat becomes a sentence
+  the listener simply loses.
+- **In a technical lecture the metaphor's stray connotations are often FALSE.** "The parent
+  hands the method down" suggests a copy is transferred; "Python reaches up the chain" suggests
+  a search cost — both invent mechanics the code does not have, and a viewer who takes them
+  literally has learned something wrong. Say "the subclass does not define `__str__`, so Python
+  uses the parent's."
+
+This is not a ban on imagery: an analogy that is *doing work* (a blueprint versus the houses
+built from it) is fine, and naming it as an analogy costs three words. The target is decoration
+— a verb chosen for colour where a plain one was available, a flourish in a summary sentence, a
+metaphor reached for because the literal statement felt flat. Flag it in review the same way as
+any other defect (see the playbook's review step), and prefer the author's own rewrite: a
+reviewer's replacement prose is unverified, and a nit that adds an explanatory aside has
+introduced a provable falsehood before now.
 
 Both stages re-check disk state and skip completed steps (a resumed video may start straight
 at B2). The producer's return includes a **`source errors corrected`** list — errors that
