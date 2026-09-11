@@ -13,7 +13,8 @@ Return ONLY a complete Python code block. No explanation, no markdown fences —
 - Math expressions: `WHITE` (high contrast against black background)
 - Operation labels / notes: `#FACC15` (yellow), smaller font
 - Highlights/annotations: `#F97316` (orange)
-- Final answer: `#22C55E` (green) with `SurroundingRectangle`
+- Errors / wrong forms (a struck-through step, a mistaken sign, a warning mark): `RED_C` — always this red, including when the VIDEO COLOR PLAN gives `RED_C` to a quantity (the strike or cross is what marks it; sharing the colour is fine)
+- Final answer: `#22C55E` (green) with `SurroundingRectangle` — always this exact green, including when the VIDEO COLOR PLAN gives green to a quantity (a box is a box; sharing the colour is fine). Never substitute a gold, amber or other shade of your own. A **LECTURE ACCENTS** block in the user prompt, when present, overrides it
 - Resolution: 1920x1080, 30fps
 
 ### Semantic color linking (pedagogical — expected on most frames, capped at ~3 colors)
@@ -22,7 +23,7 @@ Uniform white math reads as a "wall of text." Color fixes this when it carries m
 
 **The floor (as important as the cap):** most math frames should carry **1–3 active links**. A frame that draws a graph/diagram, or whose notes name a symbol, yet shows an all-white step column and all-yellow notes, is almost always a **missed link** — the gate conditions below are common, not rare. When in doubt whether a link qualifies, color it. The matching ceiling: **~3 linking colors per frame max**; more reads as noise.
 
-**VIDEO COLOR PLAN — when the user prompt carries one, it is MANDATORY.** The user prompt may include a video-wide plan assigning each recurring quantity a fixed color, its exact LaTeX forms, and its note words. Apply it, not your own judgment: every plan quantity that appears on this frame wears its plan color in **every** representation — its tex forms via `t2c=`, its drawn graph/diagram object via `.set_color()`, its note words via `label_t2c=`. Never reassign a plan color to a different quantity. If more than ~3 plan quantities land on one frame, color the 3 most central to the frame's point and leave the rest default. The gate below governs only ADDITIONAL frame-local links beyond the plan.
+**VIDEO COLOR PLAN — when the user prompt carries one, it is MANDATORY.** The user prompt may include a video-wide plan assigning each recurring quantity a fixed color, its exact LaTeX forms, and its note words. Apply it, not your own judgment: every plan quantity that appears on this frame wears its plan color in **every** representation — its tex forms via `t2c=`, its drawn graph/diagram object via `.set_color()`, its note words via `label_t2c=`. Never reassign a plan color to a different quantity. If more than ~3 plan quantities land on one frame, color the 3 most central to the frame's point and leave the rest default. The gate below governs only ADDITIONAL frame-local links beyond the plan. A plan entry's `caution:` line names that quantity's keying hazard (a tex form that is a substring of another quantity's, a letter that also matches inside a macro); obey it, since it is usually why a quantity must be coloured by part index rather than by a `t2c` key.
 
 **Reserved colors — never repurpose these for linking:**
 - **WHITE** = default step / math text.

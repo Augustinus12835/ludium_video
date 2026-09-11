@@ -388,6 +388,7 @@ def build_claude_prompt(
     prior_context: str = "",
     code_steps: List[Dict] = None,
     color_plan: Dict = None,
+    color_accents: Dict = None,
 ) -> str:
     """Build the user prompt for Claude to generate Manim code.
 
@@ -417,6 +418,8 @@ def build_claude_prompt(
             plan_lines.append(
                 f"- {name} → {spec.get('color', '?')} — tex forms: {tex_forms or '(none)'};"
                 f" note words: {words or '(none)'}")
+            if spec.get("scope"):
+                plan_lines.append(f"  caution: {spec['scope']}")
         color_plan_section = (
             "\nVIDEO COLOR PLAN (video-wide semantic color assignments — MANDATORY; see the "
             "system prompt's \"Semantic color linking\" rules):\n"
@@ -427,6 +430,15 @@ def build_claude_prompt(
             "label goes in `label_t2c=` with the same color. One color = one quantity, never "
             "reassigned. If more than ~3 plan quantities appear on this frame, color the 3 "
             "most central and leave the rest default white/yellow.\n"
+        )
+    if color_accents:
+        color_plan_section += (
+            "\nLECTURE ACCENTS (MANDATORY; this lecture overrides the defaults in the "
+            "system prompt): box every final or key result in "
+            f"`{color_accents.get('final_answer', 'GREEN')}` and mark every error or wrong "
+            f"form in `{color_accents.get('warning', 'RED_C')}`. Use these exact Manim "
+            "constants, never a hex or shade of your own, so every video of the lecture "
+            "boxes its results the same way.\n"
         )
 
     if code_steps:

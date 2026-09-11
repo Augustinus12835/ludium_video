@@ -273,9 +273,11 @@ This is context, not a task. Every video in this lecture paints these quantities
 colours, and the frame-authoring agent applies them automatically from the plan — so:
 - Write `visual` descriptions in terms of the QUANTITY ("the slope", "the step size"),
   not a colour word. The colour follows the quantity by itself.
-- Name a colour only where the frame's meaning genuinely depends on one (a red warning, a
-  gold boxed result, "the two curves must be visually distinct") — and when you do, use a
-  colour this scheme has NOT already committed to another quantity.
+- A boxed final result and a mark on an error use the lecture ACCENTS listed above — say
+  "box the result" or "mark the wrong form", not a colour.
+- Name a colour only where the frame's meaning genuinely depends on one ("the two curves
+  must be visually distinct") — and then use a colour this scheme has not already
+  committed to another quantity.
 - If your video introduces a recurring quantity the scheme does not list, describe it and
   leave the colour unstated; the plan step will assign one.
 """
@@ -291,11 +293,88 @@ once for all its videos and is binding:
 
 Your job is NOT to invent a plan. Copy every scheme entry whose quantity actually appears
 in THIS video's steps, keeping its colour EXACTLY as given, and extending its `tex` list
-with any additional LaTeX forms this video happens to use. Then, and only then, add plan
+with any additional LaTeX forms this video happens to use. Carry each copied entry's
+`scope` into your entry as well, cut to the sentences that apply to THIS video: its keying
+cautions (a tex form that is a substring of another quantity's, a letter that also matches
+inside a macro such as `c` in `\cos`) reach the frame authors only through your plan.
+Then, and only then, add plan
 entries for quantities that are genuinely local to this video, choosing colours the scheme
 has not already used. Never re-assign a scheme colour to a different quantity, and never
 give a scheme quantity a different colour.
 """
+
+
+def _read_scheme_file(path: Path) -> dict:
+    """The raw scheme mapping, reserved `_` keys included; {} when absent or unreadable."""
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    # Tolerate a wrapper: {"color_scheme": {...}, "_note": "..."}.
+    return data.get("color_scheme") if isinstance(data.get("color_scheme"), dict) else data
+
+
+# Accent colours: the final-answer box and the error/warning mark. They are FIXED at
+# GREEN and RED_C and do NOT move when the scheme gives a quantity the same colour —
+# a box is a box, a strike is a strike, and sharing a colour with a quantity costs the
+# viewer nothing. What did cost something was leaving it unsaid: one lecture's scheme
+# spent GREEN on a recurring constant, each of its five producers concluded the box
+# therefore needed a colour of its own, and the lecture shipped two different golds
+# (#F0AC5F in three videos, #EAB308 in two). A lecture that genuinely wants other
+# accents says so in a top-level `_accents` entry in color_scheme.json.
+ACCENT_DEFAULTS = {"final_answer": "GREEN", "warning": "RED_C"}
+_ACCENT_LABELS = {"final_answer": "final-answer box", "warning": "error/warning mark"}
+
+
+def resolve_color_accents(explicit=None) -> dict:
+    """The lecture's accents: the fixed defaults unless `_accents` overrides a role."""
+    explicit = explicit if isinstance(explicit, dict) else {}
+    return {role: explicit.get(role) or default
+            for role, default in ACCENT_DEFAULTS.items()}
+
+
+def load_color_accents(pipeline_dir: Path) -> dict:
+    """Accents for the staged lecture scheme, or {} when none is staged."""
+    path = Path(pipeline_dir) / COLOR_SCHEME_FILENAME
+    inner = _read_scheme_file(path)
+    quantities = {k: v for k, v in inner.items()
+                  if not k.startswith("_") and isinstance(v, dict)}
+    if not quantities:
+        return {}
+    accents = resolve_color_accents(inner.get("_accents"))
+    _warn_bad_accents(accents, path)
+    return accents
+
+
+def _warn_bad_accents(accents: dict, path: Path) -> None:
+    """Warn when an `_accents` override is not a colour name Manim will resolve.
+
+    An accent that duplicates a quantity's colour is NOT a warning: the accent is
+    fixed on purpose, and a boxed result sharing green with a green quantity reads
+    fine — the box, not the colour, is what marks it.
+    """
+    try:
+        import manim  # noqa: PLC0415 — optional at prompt-render time
+    except Exception:
+        return
+    for role, color in accents.items():
+        if not isinstance(color, str) or not hasattr(manim, color):
+            print(f"  [color_scheme] WARNING: accent {role} → {color!r} is not a Manim "
+                  f"colour constant; the render will fail ({path})", file=sys.stderr)
+
+
+def _codegen_accents(video_dir: Path) -> dict | None:
+    """The lecture's accents when it overrides them, else None.
+
+    None means the system prompt's own defaults stand (green box, red error mark),
+    which is the case for every lecture that does not set `_accents`.
+    """
+    accents = load_color_accents(video_dir.parent)
+    return accents if accents and accents != ACCENT_DEFAULTS else None
 
 
 def load_color_scheme(pipeline_dir: Path) -> dict:
@@ -310,9 +389,9 @@ def load_color_scheme(pipeline_dir: Path) -> dict:
     if not isinstance(data, dict):
         return {}
     # Tolerate a wrapper: {"color_scheme": {...}, "_note": "..."}.
-    inner = data.get("color_scheme") if isinstance(data.get("color_scheme"), dict) else data
-    scheme = {k: v for k, v in inner.items() if not k.startswith("_")}
-    _warn_bad_scheme_colors(scheme, path)
+    scheme = {k: v for k, v in _read_scheme_file(path).items() if not k.startswith("_")}
+    if scheme:
+        _warn_bad_scheme_colors(scheme, path)
     return scheme
 
 
@@ -346,8 +425,13 @@ def _warn_bad_scheme_colors(scheme: dict, path: Path) -> None:
             seen[color] = name
 
 
-def format_color_scheme(scheme: dict) -> str:
-    """Render the scheme as the human-readable lines both prompt blocks embed."""
+def format_color_scheme(scheme: dict, accents: dict | None = None) -> str:
+    """Render the scheme as the human-readable lines both prompt blocks embed.
+
+    `scope` goes in verbatim because scheme authors put the keying cautions there
+    (T inside T_e, a bare c matching inside \cos); dropping it left those cautions
+    reaching no agent at all.
+    """
     lines = []
     for name, spec in scheme.items():
         spec = spec or {}
@@ -355,6 +439,12 @@ def format_color_scheme(scheme: dict) -> str:
         words = ", ".join(f'"{w}"' for w in spec.get("note_words", []))
         lines.append(f"- {name} → {spec.get('color', '?')} — tex forms: {tex or '(none)'};"
                      f" note words: {words or '(none)'}")
+        if spec.get("scope"):
+            lines.append(f"  scope: {spec['scope']}")
+    if accents:
+        lines.append("ACCENTS (not quantities; the same in every video): "
+                     + "; ".join(f"{_ACCENT_LABELS[role]} → {accents[role]}"
+                                 for role in ACCENT_DEFAULTS if role in accents))
     return "\n".join(lines)
 
 
@@ -446,7 +536,8 @@ def step_script(args: argparse.Namespace) -> None:
     # Background only — the script author writes in quantities, not colour words.
     scheme = load_color_scheme(pipeline_dir)
     if scheme:
-        user += COLOR_SCHEME_SCRIPT_BLOCK.format(scheme=format_color_scheme(scheme))
+        user += COLOR_SCHEME_SCRIPT_BLOCK.format(
+            scheme=format_color_scheme(scheme, load_color_accents(pipeline_dir)))
 
     system = SCRIPT_SYSTEMS[mode]
     notes = (
@@ -596,10 +687,14 @@ DRAWN (a curve, a strut, an axis, a region), and confusable pairs that must stay
 - Colours come from exactly this palette (Manim constant names): BLUE, ORANGE, TEAL, PURPLE, \
 PINK, RED_C, GREEN — in roughly that order of preference. GREEN doubles as the final-answer \
 accent and RED_C as the error/warning accent, so reach for them last, or when the meaning \
-genuinely matches (RED_C for a divergence/warning, GREEN for a result).
+genuinely matches (RED_C for a divergence/warning, GREEN for a result). Spending one is fine: \
+a boxed final answer stays the final-answer green and an error mark stays RED_C even when a \
+quantity wears that colour — a box is a box, and the collision costs the viewer nothing. A \
+lecture that genuinely needs different accents sets a top-level "_accents": {"final_answer": \
+"<COLOUR>", "warning": "<COLOUR>"} entry beside the quantities.
 - One quantity per colour, and never re-use a colour. Never WHITE or YELLOW (reserved for \
-default step and note text). Leave at least one of GREEN/RED_C unassigned when you can, so \
-frames keep a free accent.
+default step and note text). GREEN and RED_C may be spent like any other colour — the accents \
+do not move, and a boxed result simply shares its green.
 - Beware near-duplicates that differ only by case or a subscript (an error constant C vs a \
 constant of integration c): if the lecture uses both, they MUST get different colours, and \
 say so in the entry's note_words.
@@ -609,7 +704,10 @@ a free-standing symbol, not a fragment. A quantity that only ever occurs brace-n
 \\\\frac{}{}, \\\\sqrt{}, ^{} or _{}) cannot be linked anywhere — do not plan a colour for it.
 - "note_words" lists the plain-English words the narration and notes use to name it \
 ("the slope", "step size"). Lowercase, 1-3 words; prefer phrases over bare single letters.
-- "scope" is a one-line note on where it appears (e.g. "videos 1-5, the Euler recurrence").
+- "scope" says where it appears (e.g. "videos 1-5, the Euler recurrence") plus any keying \
+caution the frame authors need: a tex form that is a substring of another quantity's (T inside \
+T_e), a letter that also matches inside a macro (c inside \\cos), a case collision. It is shown to \
+every script, plan and codegen agent in the lecture, so keep it to what they must act on.
 
 Respond with ONLY valid JSON, no other text:
 {
@@ -680,10 +778,11 @@ def step_color_plan(args: argparse.Namespace) -> None:
     # only extends it, so a quantity keeps one colour across every video.
     scheme = load_color_scheme(video_dir.parent)
     if scheme:
-        user += COLOR_SCHEME_PLAN_BLOCK.format(scheme=format_color_scheme(scheme))
+        user += COLOR_SCHEME_PLAN_BLOCK.format(
+            scheme=format_color_scheme(scheme, load_color_accents(video_dir.parent)))
     notes = (
         "Math/technical only. Subagent responds with ONLY the JSON plan "
-        "({name: {color, tex, note_words}}, or {} if nothing recurs). Insert the result "
+        "({name: {color, tex, note_words, scope?}}, or {} if nothing recurs). Insert the result "
         f"as the TOP-LEVEL `color_plan` key of {mv_path} (preserve everything else). "
         "Every subsequent manim-step prompt injects it as the mandatory VIDEO COLOR PLAN "
         "block; after authoring/rendering frames, lint with: venv/bin/python -c "
@@ -693,7 +792,9 @@ def step_color_plan(args: argparse.Namespace) -> None:
     if scheme:
         notes += (f" LECTURE COLOUR SCHEME {video_dir.parent / COLOR_SCHEME_FILENAME} injected "
                   f"({len(scheme)} quantities) — INHERIT those colours verbatim; add only "
-                  "video-local quantities, in colours the scheme has not used.")
+                  "video-local quantities, in colours the scheme has not used; carry each "
+                  "inherited entry's `scope` (its keying cautions) into the plan, trimmed "
+                  "to this video.")
     emit(COLOR_PLAN_SYSTEM, user, notes, pretty=args.pretty)
 
 
@@ -793,6 +894,7 @@ def step_manim(args: argparse.Namespace) -> None:
         prior_context=prior_context,
         code_steps=frame_info.get("code_steps") if frame_type == "code" else None,
         color_plan=mv.get("color_plan"),
+        color_accents=_codegen_accents(video_dir),
     )
     if frame_type == "code":
         prompt_mode = "technical"  # only technical-mode frames carry code_steps

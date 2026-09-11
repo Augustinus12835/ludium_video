@@ -79,13 +79,15 @@ Selection rules:
 - "tex" lists the EXACT LaTeX forms of the quantity as they appear in the provided expressions — copy them verbatim (e.g. "\\vec{F}", "F_{net}", "|B \\times C|"), including every variant form the steps actually use. These are substring keys for tex_to_color_map, so each must be a free-standing symbol, not a fragment.
 - A key is only usable where it sits OUTSIDE brace groups and \\left...\\right pairs: a tex_to_color_map key inside \\frac{}{}, \\sqrt{}, \\int_{}^{}, ^{} or _{} splits the LaTeX into an unbalanced fragment and silently kills the render, so frame authors are required to leave those occurrences uncolored. If a quantity occurs ONLY brace-nested (e.g. dx/dt appearing exclusively inside a \\sqrt{}), do not plan a color for it — it cannot be linked anywhere, and planning it only produces check_color_links warnings no author can fix. Prefer quantities that appear free-standing in at least one step.
 - "note_words" lists the plain-English words/short phrases the notes and operations use to name it (e.g. "force", "net force"). Lowercase, 1-3 words each; prefer multi-word phrases over bare single letters (single letters match inside other words).
+- "scope" (optional) is a short keying caution for the frame authors, shown to them beside the entry: a tex form that is a substring of another quantity's ("F inside F_{net} — part-index, never both keys in one map"), or a letter that also matches inside a macro (c inside \\cos). When the prompt carries a lecture colour scheme, copy each inherited entry's scope, trimmed to what applies to this video. Omit it when there is nothing to warn about.
 
 Respond with ONLY valid JSON, no other text:
 {
     "<short-quantity-name>": {
         "color": "ORANGE",
         "tex": ["\\\\vec{F}", "F_{net}"],
-        "note_words": ["force", "net force"]
+        "note_words": ["force", "net force"],
+        "scope": "F is a substring of F_{net} — part-index, never both keys in one t2c map"
     }
 }
 
