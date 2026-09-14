@@ -8,6 +8,16 @@ subtitle, and audit. One author for spoken + shown keeps the two tracks consiste
 what's factual and which half carries a detail; the producer still does all review/QA and
 applies QA-driven fixes.
 
+**Orchestrator: brief by REFERENCE, not by transcription.** Spawn each Stage-1, reviewer and
+Stage-2 agent with a short prompt that (a) names the video, mode and playbook section to read,
+(b) carries the handful of facts specific to THIS video — the measured numbers from the audit,
+the fixes the author already applied, the scope boundary against its siblings — and (c) stops.
+Do not restate this file in the prompt. On one lecture the orchestrator hand-wrote five
+~2,500-word reviewer briefs and five ~2,500-word producer briefs that were each ~80 % a
+paraphrase of the playbook; that is output tokens spent to produce a worse copy of a file the
+agent can read, and the paraphrases drift from the original the moment this file changes. The
+per-video facts are the only part that cannot live here.
+
 Both agents: re-check disk state at each step and skip what's already complete. **Work in
 your own scratchpad subdirectory** — `mkdir` one named for your video and stage (e.g.
 `<scratchpad>/v3_script/`, `<scratchpad>/v3_prod/`) and keep every temp `.py`, prompt dump
@@ -78,6 +88,35 @@ relays it to the Stage-1 scripting agent; bounded to 2 rounds. The reviewer only
 it never edits `script.json` (single-writer rule; concurrent whole-file writes silently
 clobber narration fixes).
 
+**Run the mechanical audit FIRST — the orchestrator does this, not the reviewer.**
+
+```bash
+python scripts/audit_script.py pipeline/<L>/Video-N --siblings
+```
+
+It does, in ~2 s, the half of this review that is pure string arithmetic: cue uniqueness
+(case-insensitive AND punctuation-free), cue substring/prefix collisions, cue-span overlaps,
+final-cue margin measured from where the phrase ENDS, first-beat latency, every span > 6 s
+with nothing scheduled, `metadata` consistency, the TTS gate, digits in spoken text, the
+calibrated `visual.reference` scope regexes, colour words, on-screen strings that would crash
+`Tex()`, and n-gram overlap against sibling videos. Findings come back tiered BLOCK / CHECK.
+`--self-test` proves every detector fires on a known-bad input and stays silent on a clean
+one; run it if you ever doubt a clean result.
+
+**Paste its output into the reviewer's brief and tell the reviewer NOT to redo those checks.**
+Before this existed, five reviewers on one lecture each re-authored the same cue checker,
+margin calculator, gap table and overlap probe — roughly half of 1.08M tokens spent on
+arithmetic. The reviewer's tokens should go to what needs judgement: the mathematics (SymPy),
+fit/scroll simulation, source fidelity, pedagogy, narration↔visual agreement, and mannered
+prose.
+
+Two calibration facts the audit encodes, so nobody re-derives them the hard way: cue phrases
+appear as BOTH `On "…"` and lowercase `on "…"` (one script ran 37 % lowercase, and a
+case-sensitive probe invented three dead spans that did not exist), and an absolute
+`len(reference) > 1200` scope trigger is a FALSE POSITIVE for this corpus — a shipped-good
+119-frame sample has a median of 1,186 chars with 44 % of known-good frames above 1,200, so
+the audit reports chars-per-narration-word (median 10.3, p90 15.4) as context instead.
+
 What it checks: coverage and fidelity to the source (nothing invented, nothing important
 dropped); narration↔visual consistency (the `visual` shows what the narration states —
 counts, values, and claims match; nothing important spoken but unshown, or shown but never
@@ -91,7 +130,22 @@ TTS-safe; displayed code/results match the narration. Also hunt phonetic respell
 ter", "too pull") — they ship VERBATIM into the SRT and no gate flags them; reword around the
 token instead.
 
-**Measure, don't guess.** Ask the reviewer for numbers, not verdicts:
+**Measure, don't guess.** Ask the reviewer for numbers, not verdicts. Use the shared prober —
+do NOT re-author one:
+
+```python
+from scripts.utils.manim_probe import simulate_stack, measure, compile_check, glyph_parity
+simulate_stack(rows, scale=0.75, step_buff=0.28, notes=[...])   # scroll verdict + per-row detail
+measure(r"\frac{u}{v}", scale=0.75)                             # width/height/glyphs, T1 preamble
+```
+
+It injects the same T1 `fontenc` preamble the render uses (rule 67 — a bare `from manim
+import *` probe measures OT1, an encoding we never ship, so its widths AND its crash verdicts
+are wrong), replicates `make_step_column`'s real geometry including that the first group is
+**centred** at `board_top` rather than hung from it, measures actual note labels, and carries
+a deliberate pessimistic `safety` allowance because it is still an approximation. Run
+`python scripts/utils/manim_probe.py --self-test` to see every probe fire on a control.
+
 (1) Build representative `MathTex` in actual Manim and measure widths against the **13.0 u ×
 7.4 u safe zone** (a Layout-B half column is ~5.8–7.0 u wide). Simulate `make_step_column`
 against the declared row count with the config that will actually ship — `font_size`/`scale`,
@@ -335,7 +389,7 @@ SUCCESS:**
   `Line`, `Axes` bbox vs stroke, 4 bezier points, `sys.exit(0)` on import…). A collision
   audit needs three comparison classes — canvas edge, label × label, label × DRAWN GEOMETRY
   (polylines, dots, axes) — one class alone reports clean over the others' defects.
-- **Width/height probe — yours, not the script's.** Print `.width`/`.height` of every long
+- **Width/height probe — yours, not the script's. Import it from `scripts/utils/manim_probe.py`; do not re-author it.** Print `.width`/`.height` of every long
   expression and every label row against 13.0 u (safe) / the column width BEFORE placing
   anything, then apply the fit in code from the measured number, unconditionally, one shared
   scale per stack (rules 36–39). A line over by more than ~10 % is fixed by an explicit break,

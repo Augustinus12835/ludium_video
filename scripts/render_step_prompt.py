@@ -704,10 +704,19 @@ a free-standing symbol, not a fragment. A quantity that only ever occurs brace-n
 \\\\frac{}{}, \\\\sqrt{}, ^{} or _{}) cannot be linked anywhere — do not plan a colour for it.
 - "note_words" lists the plain-English words the narration and notes use to name it \
 ("the slope", "step size"). Lowercase, 1-3 words; prefer phrases over bare single letters.
-- "scope" says where it appears (e.g. "videos 1-5, the Euler recurrence") plus any keying \
+- "scope" says where it appears (e.g. "videos 1-5 (5/6), the Euler recurrence") plus any keying \
 caution the frame authors need: a tex form that is a substring of another quantity's (T inside \
-T_e), a letter that also matches inside a macro (c inside \\cos), a case collision. It is shown to \
-every script, plan and codegen agent in the lecture, so keep it to what they must act on.
+T_e), a letter that also matches inside a macro (c inside \\cos), a case collision, a key that \
+silently drops a following ^2. Start with the video coverage as "videos a,b,c (n/N)".
+- **BUDGET: aim for 300-600 characters per scope, and treat 900 as a hard ceiling.** This text \
+is injected verbatim into EVERY script, colour-plan and codegen agent for the whole lecture, so \
+a bloated scope is paid once per entry per agent — dozens of times. On one recent lecture the \
+seven scopes ran 1,369-2,945 characters each, ~14k characters in total, re-sent to fifteen \
+agents. Write only what a frame author must ACT on: which videos, what the quantity means in \
+one line, and the keying cautions. Cut the justification for your colour choice, the history of \
+alternatives you rejected, and any restatement of the palette rules above — none of that changes \
+what anyone does. If a caution needs more than two sentences it probably belongs in the tex list \
+as a more precise key.
 
 Respond with ONLY valid JSON, no other text:
 {
@@ -715,7 +724,7 @@ Respond with ONLY valid JSON, no other text:
         "color": "TEAL",
         "tex": ["A_n", "A_0"],
         "note_words": ["the slope", "euler slope"],
-        "scope": "videos 1-6: the slope each step is taken along"
+        "scope": "videos 1-6 (6/6): the slope each step is taken along, on the graph and in the recurrence. KEYING: key A_n before A_0/A_1 (longest first); never key a bare A inside a Tex() carrying English words."
     }
 }"""
 

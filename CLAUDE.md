@@ -135,7 +135,7 @@ label collisions) with a screenshot:
    overlapping a sibling), insufficient `buff=`, labels placed without checking
    the target's width, missing `scale_to_fit_width` on overflowable content.
    The catalogue of defects that render SUCCESS and are still wrong is
-   `templates/manim_system_prompt.md` rules 36–73 — check it before guessing.
+   `templates/manim_system_prompt.md` rules 36–77 — check it before guessing.
 4. Edit the Manim file with a targeted fix.
 5. Re-render the single frame:
    ```bash
@@ -243,8 +243,10 @@ fallback transcription — compile and subtitle must run serially.
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
 | `compile_video.py` | Compile frames + audio into final_video.mp4 |
 | `generate_subtitles.py` | SRT subtitles from stored word timestamps (Scribe fallback) |
+| `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS (`--self-test`) |
 | `audit_frames.py` | Frame visual-QA: contact sheets + full-res busy-moment stills |
 | `utils/narration_check.py` | Pre-TTS gate: detects TTS-unsafe tokens in spoken narration |
+| `utils/manim_probe.py` | Shared Manim probes: scroll sim, width, Tex compile, glyph parity (`--self-test`) |
 | `utils/tts_rules.py` | Canonical TTS spell-out rule blocks injected into script prompts |
 | `utils/verify_prompts.py` | verify_math / verify_code / color_plan prompt constants |
 | `utils/stt.py` | ElevenLabs Scribe transcription (all sources) |

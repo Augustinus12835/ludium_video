@@ -148,7 +148,11 @@ B1 is a **conversation with one scripting agent**, not a fire-and-forget spawn:
 
 1. Spawn the Stage-1 scripting agent (most capable model). It authors `script.json`
    (narration + every frame's `visual`), regenerates `script.md`, and reports back to you.
-2. Spawn the clean-context reviewer (the playbook's review step) and relay its issue list
+2. Run `scripts/audit_script.py pipeline/<L>/Video-N --siblings` FIRST — it does the
+   arithmetic half of the review (cue uniqueness, margins, gaps, scope gate, TTS, sibling
+   overlap) in seconds, tiered BLOCK/CHECK. Then spawn the clean-context reviewer, hand it
+   that output, and tell it not to redo those checks — its tokens go to the maths, the fit
+   simulation, source fidelity, pedagogy and prose. Relay its issue list
    to the scripting agent via `SendMessage` — the scripting agent owns every script-content
    fix (narration AND visual); you may apply purely mechanical fixes (frame numbering,
    `metadata.frame_count`) yourself. Bounded to 2 rounds.
