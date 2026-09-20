@@ -30,7 +30,9 @@ compaction):
     "partial f" -> ∂f), letter subscripts ("X-zero" -> X₀), "squared"/"cubed"
     -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/",
     hyperbolic respellings ("sinch" -> sinh).
-  - era letters after a number/century: "B C" -> BC, "A D" -> AD.
+  - era letters after a number/century: "B C" -> BC, "A D" -> AD; and "A D"
+    BEFORE a year, the usual English order ("A D eighty-six" -> AD 86) — only
+    outside math mode, and only when a digit year follows directly.
 
 CLI smoke test:  python -m scripts.utils.subtitle_compact "text ..." [--math]
 """
@@ -800,7 +802,7 @@ def _pass_symbol_operands(toks: List[_Tok]) -> None:
                 nxt.core, nxt.mathy = str(v), True
 
 
-def _pass_era(toks: List[_Tok]) -> None:
+def _pass_era(toks: List[_Tok], math_mode: bool = False) -> None:
     i = 1
     while i < len(toks) - 1:
         a, b = toks[i], toks[i + 1]
@@ -808,8 +810,16 @@ def _pass_era(toks: List[_Tok]) -> None:
         if pair in ('BC', 'AD') and not a.trail and not a.lead and \
                 not b.lead:
             prev = toks[i - 1]
+            nxt = toks[i + 2] if i + 2 < len(toks) else None
             if (prev.core and prev.core[-1].isdigit()) or \
                     prev.core.lower() in _ERA_PRECEDERS:
+                _merge(toks, i, i + 2, pair, mathy=False)
+            # English writes AD BEFORE the year ("A D eighty-six" -> "AD 86"),
+            # which the after-a-number rule above never sees. By this pass the
+            # year is already one digit token. Two capital letters before a
+            # number are plausible math, so this side stays off in math mode.
+            elif pair == 'AD' and not math_mode and not b.trail and \
+                    nxt is not None and not nxt.lead and nxt.core[:1].isdigit():
                 _merge(toks, i, i + 2, pair, mathy=False)
         i += 1
 
@@ -838,7 +848,7 @@ def compact_words(words: List[Dict], math_mode: bool = False) -> List[Dict]:
         _pass_negative(toks)
         _pass_coefficients(toks)
         _pass_over_times(toks)
-    _pass_era(toks)
+    _pass_era(toks, math_mode)
     return [{'word': t.text, 'start': t.start, 'end': t.end}
             for t in toks if t.text]
 

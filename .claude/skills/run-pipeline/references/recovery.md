@@ -10,7 +10,7 @@ Symptoms: `FAIL: Manim render failed`, LaTeX errors, `cannot import name`, an
 `AttributeError` traceback naming `frame_<N>_manim.py`.
 
 Read the frame's `.py` and the error tail; diagnose with `templates/manim_system_prompt.md`
-(rules 36–77 are the silent-defect catalogue). Recurring culprits: unbalanced `{}` in
+(rules 36–79 are the silent-defect catalogue). Recurring culprits: unbalanced `{}` in
 `MathTex`; a `t2c` key inside ANY macro brace — `\frac`, `\int_{}`, `^{}`, `\text{}`, even a
 bare `\mathrm{Var}(…)` (`Missing } inserted`); `\cancel`/`\ding`/other non-amsmath macros
 (delete the call — a "fallback" reassignment after it is dead code); bare `^`/`\sin` in a
@@ -122,10 +122,10 @@ Fix the source the report names — `script.json` narration for every frame clas
 LEGACY pre-2026-08-30 video names `natural_narration` in `math_verification.json`; fix both
 there when unsure). On-screen text keeps
 its normal form; only spoken text changes. The gate fires in Stage 2 (the producer runs
-tts): mechanical token conversions (the table above) may be applied directly; anything that
-genuinely rephrases a sentence (`sentence_a`, pacing rewording) is spoken-text authoring —
-route it through a one-shot subagent on the scripting model. Resume `--from tts`; for a
-confirmed false positive only, resume once with `SKIP_NARRATION_CHECK=1`.
+tts) and the producer fixes it — mechanical token conversions (the table above) and genuine
+rephrasings (`sentence_a`, pacing rewording) alike, keeping every `On "…"` cue phrase
+verbatim. Resume `--from tts`; for a confirmed false positive only, resume once with
+`SKIP_NARRATION_CHECK=1`.
 
 If an edit meaningfully lengthens a frame's audio on an animated frame, re-render that frame
 after tts so the animation re-aligns (see CLAUDE.md "Fixing TTS / Narration").

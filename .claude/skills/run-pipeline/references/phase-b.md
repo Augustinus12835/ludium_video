@@ -270,9 +270,9 @@ execution is the verification — there is no separate SymPy gate.
 2026-08-30 — it fixed nothing the TTS gate detects and silently mutated ~22% of verified
 frames, breaking cue anchors). TTS, subtitles and codegen all read `script.json`'s
 narration verbatim for every frame class. If SymPy shows a spoken value is WRONG, the fix is
-a script fix: route the exact wrong→right wording to a one-shot subagent on the scripting
-model that edits `script.json frames[N].narration` (keeping every `On "…"` cue phrase in
-`visual.reference` verbatim), record it in `issues_found`, and flag it in your report.
+a script fix you apply yourself: edit `script.json frames[N].narration` with the exact
+wrong→right wording (keeping every `On "…"` cue phrase in `visual.reference` verbatim),
+record it in `issues_found`, and flag it in your report.
 Deliberate source rounding is not an error — `math_steps` show the value the narration
 speaks; when a script follows the source's rounded path on purpose, make that explicit in
 narration and in `visual.reference`, so nobody "corrects" it to more digits later.

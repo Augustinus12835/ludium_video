@@ -61,6 +61,36 @@ have the lecturer's official notes/handout, save them as Markdown at
 clean|script` inject them automatically as ground truth for every equation and
 worked example (an ASR transcript never sees the board).
 
+**Dated lectures — refresh stale figures at clean time (`--refresh-figures`).** Opt-in,
+and meant for finance/economics/business courses whose *evidence* is market data (market
+sizes, yields, rankings, "over the past N years"); a math/physics/CS course whose theory has
+moved on is caught by the script/review agents, not by this. For a lecture old enough that
+its real-world numbers no longer describe the world (a 2008 finance lecture recorded during
+the crisis), render the clean prompt with
+`render_step_prompt.py clean --refresh-figures --recorded "Fall 2008"`. It adds a review
+that sorts every number into three buckets and treats each differently: **worked-example
+inputs are NEVER touched** (altering one breaks every figure downstream, the on-screen math
+and verification); **period-anchored facts** (a crisis unfolding as the lecturer speaks) keep
+their value but gain an explicit date so they cannot read as current; **currency-claiming
+figures** (market sizes, "over the past N years", "rates are low right now", rankings,
+current yields) are WEB-SEARCHED against a primary source — SIFMA, Fed/FRED, Treasury, BLS,
+an exchange, a filing — never recalled, because a model's sense of a current value is staler
+than the research. No solid source ⇒ keep the original and date it; an honestly dated old
+number beats a confident wrong new one. Refreshes are SILENT in narration (never "the
+lecturer said X, but today Y") and never silently reverse the argument — where a claim has
+genuinely reversed, keep the dated original and add the change in one clause. Each change is
+logged to `<L>/figure_updates.json` (original/refreshed/as_of/source/source_url/note; a cut
+claim is `"refreshed": "(removed)"`), which `render_step_prompt.py script` then injects
+automatically on file presence — no flag — so the scripting agent narrates the refreshed
+value instead of re-staling it from memory. Multi-chunk lectures emit one JSON block per
+chunk — merge the lists into ONE `figure_updates.json`. **Gate before segment:**
+`scripts/audit_figure_updates.py pipeline/<L>` traces every entry into `content_cleaned.txt`
+(tiers `verbatim` / `normalized` / `figures` = numbers present but the log entry is a
+paraphrase / `MISSING`) and BLOCKs on a figure the prose does not carry or an entry with no
+`source_url` — either is a recalled figure, not a researched one. (First course run: 123
+entries over 23 units; one BLOCK was a refresh the agent researched, logged, and then never
+wrote into the prose.)
+
 ### Pipeline Modes
 
 Two modes. Math is auto-detected from folder prefixes (`Calculus_`,
@@ -135,7 +165,7 @@ label collisions) with a screenshot:
    overlapping a sibling), insufficient `buff=`, labels placed without checking
    the target's width, missing `scale_to_fit_width` on overflowable content.
    The catalogue of defects that render SUCCESS and are still wrong is
-   `templates/manim_system_prompt.md` rules 36–77 — check it before guessing.
+   `templates/manim_system_prompt.md` rules 36–79 — check it before guessing.
 4. Edit the Manim file with a targeted fix.
 5. Re-render the single frame:
    ```bash
@@ -244,6 +274,7 @@ fallback transcription — compile and subtitle must run serially.
 | `compile_video.py` | Compile frames + audio into final_video.mp4 |
 | `generate_subtitles.py` | SRT subtitles from stored word timestamps (Scribe fallback) |
 | `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS (`--self-test`) |
+| `audit_figure_updates.py` | Dated-lecture gate: trace every `figure_updates.json` refresh into `content_cleaned.txt`, require `source_url` (`--self-test`) |
 | `audit_frames.py` | Frame visual-QA: contact sheets + full-res busy-moment stills |
 | `utils/narration_check.py` | Pre-TTS gate: detects TTS-unsafe tokens in spoken narration |
 | `utils/manim_probe.py` | Shared Manim probes: scroll sim, width, Tex compile, glyph parity (`--self-test`) |

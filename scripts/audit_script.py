@@ -35,6 +35,15 @@ by hand the hard way:
     REGEXES (measured widths, scale directives, canvas coords, Manim API, rules blocks) are
     the real signal; length is reported as chars-per-narration-word (corpus median 10.3,
     p90 15.4) purely as context.
+
+NARRATION-ONLY SCRIPTS (2026-09-15). Only math / technical frames schedule their visuals by cue
+phrase and declare a `frame_class`. A script authored for a separately-built visual track (an
+illustration stream or per-frame plan laid over the narration afterwards) does neither, and its
+`visual.reference` is a placeholder. The audit used to report one "no-cues" BLOCK per frame on
+every such script and, because that path returned early, never ran the TTS checks on them at
+all. A script in which NO frame declares a `frame_class` is now audited as narration-only: the
+reference checks are skipped and the spoken-text TTS checks still run. A math script still
+BLOCKs on a frame with no cues.
 """
 import argparse
 import json
@@ -98,8 +107,11 @@ def _find_span(hay_words, needle_words):
     return None
 
 
-def audit_frame(frame, idx):
-    """All per-frame mechanical checks. Returns (findings, stats)."""
+def audit_frame(frame, idx, cue_schedule=True):
+    """All per-frame mechanical checks. Returns (findings, stats).
+
+    cue_schedule=False audits a narration-only frame: its `visual.reference` is a placeholder,
+    so only the spoken text is checked (see the module docstring)."""
     num = frame.get("number", idx)
     narration = frame.get("narration", "") or ""
     visual = frame.get("visual") or {}
@@ -110,10 +122,16 @@ def audit_frame(frame, idx):
     dur = len(nw) / WPS
     st["duration_est"] = round(dur, 1)
 
+    if not cue_schedule:
+        st["cues"] = 0
+        _audit_tts(f, num, narration)
+        return f, st
+
     cues = CUE_RE.findall(ref)
     st["cues"] = len(cues)
     if not cues:
         f.append((num, "no-cues", "reference schedules nothing"))
+        _audit_tts(f, num, narration)
         return f, st
 
     spans = []
@@ -190,6 +208,12 @@ def audit_frame(frame, idx):
         for ch in set(s) & set(RAW_MATH_GLYPHS):
             f.append((num, "raw-glyph", f"U+{ord(ch):04X} in quoted string: '{s[:40]}'"))
 
+    _audit_tts(f, num, narration)
+    return f, st
+
+
+def _audit_tts(f, num, narration):
+    """TTS safety of the SPOKEN text: applies to every mode, narration-only included."""
     issues = []
     try:
         from scripts.utils.narration_check import find_tts_issues
@@ -201,7 +225,6 @@ def audit_frame(frame, idx):
     digits = re.findall(r"\d", narration)
     if digits:
         f.append((num, "tts-digits", f"{len(digits)} Arabic numeral(s) in spoken text"))
-    return f, st
 
 
 def ngram_overlap(a: str, b: str, n=8):
@@ -233,8 +256,10 @@ def audit(video_dir: Path, siblings=False):
     if meta.get("word_count") not in (None, total):
         findings.append((None, "meta-word-count", f"metadata says {meta['word_count']}, frames sum to {total}"))
 
+    # Only Manim scripts declare a frame_class; a script where none does is narration-only.
+    cue_schedule = any(fr.get("frame_class") for fr in frames)
     for i, fr in enumerate(frames):
-        f, st = audit_frame(fr, i)
+        f, st = audit_frame(fr, i, cue_schedule)
         findings += f
         stats.append(st)
 
@@ -249,7 +274,7 @@ def audit(video_dir: Path, siblings=False):
             if ov > 0.02:
                 findings.append((None, "sibling-overlap",
                                  f"{sib.name}: {100*ov:.1f}% of 8-grams shared — check for re-teaching"))
-    return findings, stats, script
+    return findings, stats, script, cue_schedule
 
 
 def main():
@@ -265,20 +290,26 @@ def main():
     if not a.video_dir:
         ap.error("video_dir required (or --self-test)")
 
-    findings, stats, script = audit(Path(a.video_dir), a.siblings)
+    findings, stats, script, cue_schedule = audit(Path(a.video_dir), a.siblings)
     if a.json:
-        print(json.dumps({"findings": [{"frame": f, "check": c, "detail": d} for f, c, d in findings],
+        print(json.dumps({"narration_only": not cue_schedule,
+                          "findings": [{"frame": f, "check": c, "detail": d} for f, c, d in findings],
                           "stats": stats}, indent=2))
         return 1 if findings else 0
 
     print(f"script audit — {a.video_dir}")
     print(f"  {len(script.get('frames', []))} frames, {script.get('metadata', {}).get('word_count', '?')} words\n")
-    hdr = f"  {'f':>3} {'class':<7}{'cues':>5}{'1st':>6}{'maxgap':>8}{'margin':>8}{'ref/w':>7}"
-    print(hdr); print("  " + "-" * (len(hdr) - 2))
-    for s in stats:
-        print(f"  {s['frame']:>3} {str(s.get('frame_class') or '-'):<7}{s.get('cues', 0):>5}"
-              f"{s.get('first_beat', 0):>6}{s.get('max_gap', 0):>8}"
-              f"{s.get('final_margin', 0):>8}{s.get('ref_per_word', 0):>7}")
+    if cue_schedule:
+        hdr = f"  {'f':>3} {'class':<7}{'cues':>5}{'1st':>6}{'maxgap':>8}{'margin':>8}{'ref/w':>7}"
+        print(hdr); print("  " + "-" * (len(hdr) - 2))
+        for s in stats:
+            print(f"  {s['frame']:>3} {str(s.get('frame_class') or '-'):<7}{s.get('cues', 0):>5}"
+                  f"{s.get('first_beat', 0):>6}{s.get('max_gap', 0):>8}"
+                  f"{s.get('final_margin', 0):>8}{s.get('ref_per_word', 0):>7}")
+    else:
+        print("  NARRATION-ONLY script (no frame declares a frame_class). The visual track is")
+        print("  authored separately, so the cue, scope, colour and Tex checks do not apply.")
+        print("  Metadata, sibling-overlap and spoken-text TTS checks ran.")
     if findings:
         order = {"BLOCK": 0, "CHECK": 1}
         ranked = sorted(findings, key=lambda x: order.get(SEVERITY.get(x[1], "CHECK"), 1))
@@ -289,10 +320,11 @@ def main():
             print(f"    {SEVERITY.get(check, 'CHECK'):<5} [{check}] {where}: {detail}")
     else:
         print("\n  CLEAN — every mechanical check passed.")
-    print("\n  The first-beat and gap figures are derived from CUE PHRASES only. An element")
-    print("  present from t=0 (a held title card, a problem line in the top band) is invisible")
-    print("  to them, so a 'dead-open' on a frame that opens on a held board is a false")
-    print("  positive — confirm against the reference before acting on it.")
+    if cue_schedule:
+        print("\n  The first-beat and gap figures are derived from CUE PHRASES only. An element")
+        print("  present from t=0 (a held title card, a problem line in the top band) is invisible")
+        print("  to them, so a 'dead-open' on a frame that opens on a held board is a false")
+        print("  positive — confirm against the reference before acting on it.")
     print("\n  Not checked here (needs judgement — that is the reviewer's job): the mathematics,")
     print("  fit/scroll simulation (scripts/utils/manim_probe.py), source fidelity, pedagogy,")
     print("  narration↔visual agreement, and mannered prose.")
@@ -301,8 +333,8 @@ def main():
 
 def self_test():
     """A check that has never fired is untested, not reassuring. Prove each one fires."""
-    def one(name, frame, want):
-        f, _ = audit_frame(frame, 0)
+    def one(name, frame, want, cue_schedule=True):
+        f, _ = audit_frame(frame, 0, cue_schedule)
         got = {c for _, c, _ in f}
         ok = want in got
         print(f"  {'PASS' if ok else 'FAIL'}  {name:<22} expect '{want}'  got {sorted(got) or '[]'}")
@@ -330,9 +362,17 @@ def self_test():
                        "visual": {"reference": """On "product rule" a tag 'let Δt → 0'."""}}, "raw-glyph"),
         ("tts digits", {"number": 0, "narration": "We take 3 steps and then we finish the proof.",
                         "visual": {"reference": 'On "We take" a box. On "finish the proof" a tag.'}}, "tts-digits"),
+        ("math frame, no cues", {"number": 0, "frame_class": "math", "narration": good,
+                                 "visual": {"reference": "A box appears."}}, "no-cues"),
+    ]
+    # A narration-only frame skips the reference checks but must still get the TTS checks.
+    narr_only = [
+        ("narration-only digits", {"number": 0, "narration": "In 323 the king died at Babylon.",
+                                   "visual": {"reference": "Placeholder: GREEN hills."}}, "tts-digits"),
     ]
     print("self-test — each case must FIRE its detector:")
     ok = all(one(n, fr, w) for n, fr, w in cases)
+    ok = all(one(n, fr, w, cue_schedule=False) for n, fr, w in narr_only) and ok
     # NOTE: the clean control needs a real tail after its final cue, and no cue phrase may
     # repeat anywhere in the narration. Two earlier versions of this fixture were wrong (one
     # ended on its final cue, one duplicated "We begin") and the detectors correctly fired on
@@ -345,6 +385,14 @@ def self_test():
     f, _ = audit_frame(clean, 0)
     neg = not f
     print(f"  {'PASS' if neg else 'FAIL'}  {'negative control':<22} expect no findings  got {[c for _, c, _ in f] or '[]'}")
+    # The false positive narration-only mode removes: a clean narration-only frame whose placeholder
+    # reference has no cues and a colour word must produce NOTHING.
+    wc = {"number": 0, "narration": clean_narr,
+          "visual": {"type": "illustration", "reference": "Placeholder: a GREEN hillside at dawn."}}
+    f2, _ = audit_frame(wc, 0, cue_schedule=False)
+    neg2 = not f2
+    print(f"  {'PASS' if neg2 else 'FAIL'}  {'narration-only control':<22} expect no findings  got {[c for _, c, _ in f2] or '[]'}")
+    neg = neg and neg2
     print("\n" + ("all detectors fire and the clean control stays silent" if ok and neg else "SELF-TEST FAILED"))
     return 0 if (ok and neg) else 1
 

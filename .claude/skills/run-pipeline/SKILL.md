@@ -96,11 +96,31 @@ and PPTX sources arrive with `content_cleaned.txt` — start at segment.
    venv/bin/python scripts/render_step_prompt.py clean --transcript pipeline/<L>/transcript.json --chunk-index <i>
    ```
    Each subagent returns only its cleaned text; join with `\n\n` → `content_cleaned.txt`.
+   **Dated course?** (finance/economics whose evidence is market data) Append
+   `--refresh-figures --recorded "<when>"` to every chunk render (full policy in CLAUDE.md,
+   "Dated lectures"): worked-example inputs stay frozen, period facts get an explicit date,
+   currency-claiming figures are web-searched against a primary source and logged to
+   `figure_updates.json`, which the `script` step then injects automatically. Each chunk emits
+   its own JSON block: strip them from the prose, MERGE the lists into one
+   `pipeline/<L>/figure_updates.json`, then gate with `scripts/audit_figure_updates.py
+   pipeline/<L>` before segment — a BLOCK is a logged figure the prose does not carry (the
+   agent researched it and then cut or rewrote the sentence) or an entry with no `source_url`;
+   drop or re-clean it, never leave it for the script stage to narrate. Budget ~200 WebSearch
+   calls per session — a 20-lecture course exhausts it, after which agents can still `WebFetch`
+   a named primary domain but lose discovery, so front-load the lectures richest in live
+   figures. **Give each chunk agent a chunk-NAMESPACED name for its rendered prompt**
+   (`c<i>_prompt.json`): parallel chunk agents share the lecture dir, and a generic `user.txt`
+   gets clobbered mid-run — which silently cleans the WRONG span.
 3. **Coverage gate (required before segment).** Cleaning compresses but must never lose
    coverage — a clean subagent can silently drop the tail. Verify: (a) the last ~400 words
    of source and of `content_cleaned.txt` reach the same closing material; (b) `wc -w`
    both — cleaned text lands at ~55–70% of source; below ~45% or a chunk-sized hole means a
-   dropped span, not aggressive editing; (c) every chunk `0..N-1` made it into the join;
+   dropped span, not aggressive editing. **The band is advisory, not a verdict**: a lecture
+   that is genuinely mostly administration cleans far lower and is still correct (an intro
+   lecture of syllabus and grading landed at 36.7% with its tail reaching the true closing
+   thought), and a dense lecture whose agent legitimately recovered slide content the
+   lecturer pointed at can exceed 75%. Judge (a), (d) and span affinity before the ratio;
+   (c) every chunk `0..N-1` made it into the join;
    **(d) every chunk SEAM joins grammatically** — a-c all pass while a sentence is torn in
    half at a boundary, because each chunk agent assumes the other wrote the missing part. On
    one lecture the join read "…float ```\n\nof hours, colon, number of minutes, colon, number

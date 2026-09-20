@@ -250,12 +250,180 @@ this video covers — the notes may span more than this video.
 """
 
 
+# -----------------------------------------------------------------------------
+# Dated-figure review (opt-in: `clean --refresh-figures`)
+# -----------------------------------------------------------------------------
+# For lectures old enough that their real-world numbers no longer describe the
+# world — an MIT finance course recorded DURING the 2008 crisis has
+# market sizes, index levels and "right now" claims are ~18 years stale while
+# its crisis narrative is exactly what makes it worth teaching. The block sorts
+# every figure into three buckets because the naive fix (refresh everything)
+# breaks worked examples, and the other naive fix (change nothing) ships a
+# lecture that asserts 2008 conditions in the present tense.
+
+FIGURE_REFRESH_CLEAN_BLOCK = """
+
+---
+
+DATED-FIGURE REVIEW (this lecture was recorded {recorded}; today is {as_of}).
+
+This lecture is old enough that some of its real-world numbers no longer describe the world.
+Sort EVERY figure, statistic, ranking and "currently/today/recently" claim in the transcript
+into exactly one of three buckets, and treat each bucket differently:
+
+1. PEDAGOGICAL — inputs to a worked example, exercise or derivation ("a $1,000 face value bond
+   with a 7% coupon", "assume the stock trades at $60"). **NEVER change these.** They are
+   arithmetic, not observations: altering an input silently breaks every number downstream, the
+   on-screen math and the verification step. Reproduce them exactly as given.
+
+2. PERIOD-ANCHORED — facts belonging to the moment of recording that are part of what the
+   lecture is teaching: the financial crisis unfolding as he speaks, Lehman's collapse,
+   crisis-era prices and spreads used to illustrate the crisis itself. **Keep the value**, but
+   make sure the prose carries its date explicitly ("in 2008", "at the height of the crisis")
+   so a reader today cannot mistake it for a current observation. Add that period marker
+   wherever the lecturer's spoken "right now" leaves it implicit.
+
+3. CURRENCY-CLAIMING — assertions that were only true at the time of speaking and are NOT
+   about the crisis: market sizes, "the bond market is roughly $X", "over the past twenty
+   years", "rates are historically low right now", "the world's wealthiest individual",
+   "company Y doesn't pay a dividend", index levels, current yields, league tables.
+   **Research the current value and refresh it**, with an explicit as-of date in the prose.
+
+RESEARCH RULES for bucket 3 — do not skip these:
+- **Look it up. Do not recall it.** Your own sense of a "current" market size or index level is
+  stale and approximate. Use web search, and prefer a primary or official source (SIFMA, the
+  Federal Reserve/FRED, the Treasury, the exchange itself, a company filing, a central bank)
+  over a news summary or an aggregator.
+- Refresh only figures the lecture actually leans on. A number mentioned once in passing that
+  carries no argument can simply take a period marker (bucket 2) instead.
+- If you cannot find a solid current figure, DO NOT invent or extrapolate one — leave the
+  original and give it a period marker. An honestly dated old number beats a confident wrong
+  new one.
+- Keep the lecturer's ARGUMENT intact. You are refreshing evidence, not rewriting the teaching.
+  If a refreshed figure would undercut the point being made (a spread that has since inverted,
+  an effect that has since disappeared), keep the original as the period example and note the
+  change in one clause rather than silently reversing his claim.
+- The magnitude is often the point. When a number is quoted to show scale or growth, the
+  refreshed figure must still do that job.
+
+HOW IT READS. Write the refreshed prose so a viewer meets current facts without being told the
+lecture is old at every turn. Do NOT narrate the correction — never "the lecturer said X, but
+today it is Y", and never address the source as a source. Where the CHANGE is itself worth
+teaching (a market that has grown tenfold since), one clean then-and-now contrast is welcome:
+"in 2008 roughly $X; as of {as_of_year}, about $Y". Otherwise simply state the current figure
+with its as-of date.
+
+RECORD EVERY CHANGE. After the cleaned prose, emit a fenced JSON block listing each bucket-3
+refresh, so the change is auditable and the later script and verification stages can check it:
+
+```json
+{{"figure_updates": [
+  {{"original": "<exact phrase from the transcript>",
+    "refreshed": "<the phrase as you wrote it>",
+    "as_of": "<date or period the new figure describes>",
+    "source": "<organisation>",
+    "source_url": "<url>",
+    "note": "<why it needed refreshing, one line>"}}
+]}}
+```
+
+Rules for the log — it is audited mechanically (`scripts/audit_figure_updates.py`):
+- `refreshed` is a VERBATIM, CONTIGUOUS excerpt of the cleaned prose you emitted above —
+  copy the one sentence (or clause) that carries the new figure. Never an ellipsis-joined
+  summary of several sentences: if one piece of research rewrote several sentences, log one
+  entry per sentence. The audit greps content_cleaned.txt for the string; a paraphrase
+  cannot be traced and reads as a recalled figure.
+- `source_url` is the page you actually read. An entry without one fails the audit.
+- If you CUT a currency claim outright instead of refreshing it (a person described as
+  currently teaching who has since died; a "right now" aside carrying no teaching), log it
+  with `"refreshed": "(removed)"` and say why in `note` — the script stage must know what
+  not to reintroduce.
+- Log ONLY what you changed. A figure you left in place with a period marker (bucket 2) is
+  not an entry — and never log a refresh you did not actually write into the prose.
+
+Emit that block LAST, after the cleaned prose. If you refreshed nothing, emit an empty list.
+The orchestrator saves it to <pipeline>/figure_updates.json.
+"""
+
+
 def load_reference_notes(pipeline_dir: Path) -> str:
     """Return the staged reference notes for a lecture, or '' when none exist."""
     path = Path(pipeline_dir) / REFERENCE_NOTES_FILENAME
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8").strip()
+
+
+# -----------------------------------------------------------------------------
+# Refreshed real-world figures (written by `clean --refresh-figures`)
+# -----------------------------------------------------------------------------
+# Injected into the SCRIPT prompt on file presence — no flag, same idiom as the
+# OCW notes. Without this the research is wasted: the scripting agent writes
+# narration from the refreshed content but "knows" the old number, and either
+# rounds it back from memory or re-dates it. The block also stops the agent
+# narrating the update itself, which is meta-content about a source the viewer
+# has never seen (same rule as the on-air source-correction ban).
+
+FIGURE_UPDATES_FILENAME = "figure_updates.json"
+
+FIGURE_UPDATES_SCRIPT_BLOCK = """
+
+---
+
+REFRESHED FIGURES. The source lecture is old. These real-world values were researched against
+cited sources at the cleaning stage and already rewritten into the SOURCE CONTENT above:
+
+{updates}
+
+Handle them exactly as follows:
+- Narrate, and put on screen, the refreshed value with its as-of label. Do NOT restore the
+  lecture's original number, and do NOT round, re-date or "correct" a refreshed figure from
+  your own memory — your sense of the current value is staler than this research.
+- Do NOT narrate the update itself. The viewer is never told that the lecture is old, that a
+  figure was changed, or that a source said otherwise.
+- Worked-example inputs were deliberately NOT refreshed, because changing an input breaks the
+  arithmetic downstream. Where a number feeds a calculation, use the source content's value.
+- If you need a current real-world figure that is NOT listed here, take it from the source
+  content as written — never invent one.
+"""
+
+
+def load_figure_updates(pipeline_dir: Path) -> str:
+    """Render the clean step's researched figure refreshes, or '' when none exist."""
+    path = Path(pipeline_dir) / FIGURE_UPDATES_FILENAME
+    if not path.exists():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        # Silently dropping the research would re-stale every figure from memory.
+        print(f"WARNING: {path} is not valid JSON ({e}) — refreshed figures NOT injected",
+              file=sys.stderr)
+        return ""
+    items = data.get("figure_updates", []) if isinstance(data, dict) else data
+    lines = []
+    for it in items or []:
+        if not isinstance(it, dict) or not it.get("refreshed"):
+            continue
+        refreshed = it["refreshed"].strip()
+        original = (it.get("original") or "").strip()
+        meta = " · ".join(x for x in (
+            f"as of {it['as_of']}" if it.get("as_of") else "",
+            it.get("source", ""),
+        ) if x)
+        # A cut claim is logged with a placeholder rather than a replacement value
+        # (e.g. a person described as currently teaching, who has since died). It is
+        # not a figure to narrate — it is a thing NOT to reintroduce.
+        if refreshed.strip("()").lower() in ("removed", "dropped", "deleted", "n/a", "none"):
+            line = f"- REMOVED from the source, do NOT reintroduce: {original or '(see figure_updates.json)'}"
+            if it.get("note"):
+                line += f"\n    (why: {it['note'].strip()})"
+        else:
+            line = f"- {refreshed}" + (f"  [{meta}]" if meta else "")
+            if original:
+                line += f"\n    (the lecture's own wording was: {original})"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 COLOR_SCHEME_FILENAME = "color_scheme.json"
@@ -448,7 +616,6 @@ def format_color_scheme(scheme: dict, accents: dict | None = None) -> str:
     return "\n".join(lines)
 
 
-
 # -----------------------------------------------------------------------------
 # Step handlers
 # -----------------------------------------------------------------------------
@@ -481,6 +648,22 @@ def step_clean(args: argparse.Namespace) -> None:
         user = user.replace(cue, block + cue, 1) if cue in user else user + block
         notes += (f" reference_notes={path.parent / REFERENCE_NOTES_FILENAME} injected "
                   f"({len(ref.split()):,} words) — ground every equation/example in them.")
+    # Dated-figure review, opt-in. Sits AFTER the notes block so the cleaner reads
+    # ground truth first and the currency policy second.
+    if getattr(args, "refresh_figures", False):
+        import datetime as _dt
+        as_of = _dt.date.today().isoformat()
+        fig = FIGURE_REFRESH_CLEAN_BLOCK.format(
+            recorded=args.recorded or "well before the present day",
+            as_of=as_of, as_of_year=as_of[:4])
+        cue = "\n---\n\nEDUCATIONAL CONTENT:"
+        user = user.replace(cue, fig + cue, 1) if cue in user else user + fig
+        notes += (f" figure_refresh=ON (recorded {args.recorded or 'unknown'}; as of {as_of}) — "
+                  "bucket-3 figures must be WEB-SEARCHED, not recalled. Each chunk emits its own "
+                  "trailing figure_updates JSON; MERGE the lists into ONE <pipeline>/figure_updates.json "
+                  "(strip the JSON from content_cleaned.txt), then gate: `python scripts/"
+                  "audit_figure_updates.py <pipeline>` — BLOCK = a logged figure the prose does not "
+                  "carry, or an entry with no source_url; re-clean or drop the entry before segment.")
     emit(CLEAN_PIPELINE_SYSTEM, user, notes, pretty=args.pretty)
 
 
@@ -532,6 +715,10 @@ def step_script(args: argparse.Namespace) -> None:
     ref = load_reference_notes(pipeline_dir)
     if ref:
         user += REFERENCE_NOTES_SCRIPT_BLOCK.format(notes=ref)
+    # Refreshed real-world figures, when the clean step researched any.
+    figs = load_figure_updates(pipeline_dir)
+    if figs:
+        user += FIGURE_UPDATES_SCRIPT_BLOCK.format(updates=figs)
     # Lecture-level colour scheme, when staged (Phase A `color_scheme` step).
     # Background only — the script author writes in quantities, not colour words.
     scheme = load_color_scheme(pipeline_dir)
@@ -550,6 +737,9 @@ def step_script(args: argparse.Namespace) -> None:
     if ref:
         notes += (f" reference_notes={pipeline_dir / REFERENCE_NOTES_FILENAME} injected "
                   "(official notes — on-screen formulas must match their form).")
+    if figs:
+        notes += (f" figure_updates={pipeline_dir / FIGURE_UPDATES_FILENAME} injected — narrate the "
+                  "refreshed values with their as-of labels; never restore or re-round the originals.")
     if scheme:
         notes += (f" color_scheme={pipeline_dir / COLOR_SCHEME_FILENAME} injected as BACKGROUND "
                   f"({len(scheme)} quantities) — write `visual` in quantities, not colour words.")
@@ -658,9 +848,9 @@ def step_verify_math(args: argparse.Namespace) -> None:
         "SPOKEN TEXT: do NOT write a `natural_narration` field (retired 2026-08-30). TTS, "
         "subtitles and codegen read script.json's narration VERBATIM for every frame class; "
         "it is already TTS-safe and reviewed. If the verification changes what must be SAID "
-        "(a wrong value), fix script.json frames[N].narration itself — a spoken-text edit "
-        "belongs to the scripting model (route it like a review fix) — and record the "
-        "wrong→right in issues_found. Once ALL frames are verified, run the "
+        "(a wrong value), fix script.json frames[N].narration itself — keeping every "
+        "`On \"…\"` cue phrase in visual.reference verbatim — and record the wrong→right in "
+        "issues_found. Once ALL frames are verified, run the "
         "`color_plan` step to add the video-wide semantic color plan (top-level key)."
     )
     emit(VERIFY_MATH_SYSTEM, user, notes, pretty=args.pretty)
@@ -942,6 +1132,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("clean", help="clean_transcript.py prompt")
     sp.add_argument("--transcript", required=True, help="Path to transcript.json or plain-text file")
     sp.add_argument("--chunk-index", type=int, default=0)
+    sp.add_argument("--refresh-figures", action="store_true",
+                    help="Add the dated-figure review block: worked-example inputs untouched, "
+                         "crisis-era facts period-anchored, currency-claiming figures (market "
+                         "sizes, 'past 20 years', rankings, current yields) researched and "
+                         "refreshed with sources into figure_updates.json")
+    sp.add_argument("--recorded", default="",
+                    help="When the lecture was recorded, e.g. 'Fall 2008' — used by --refresh-figures")
     add_common(sp)
     sp.set_defaults(func=step_clean)
 
