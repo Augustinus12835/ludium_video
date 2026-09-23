@@ -296,8 +296,12 @@ REQUIREMENTS:
        "visual", so its values get the SymPy verification pass.
 
    **For math/calculation frames**, use a Layout prefix:
-   - **Layout A** (Full Whiteboard): Pure derivation or step-by-step procedure.
+   - **Layout A** (Full Whiteboard): Pure derivation or step-by-step procedure, NO diagram.
      Use for: derivations, simplifications, solving equations, proofs, calculations.
+   - **Layout B** (Split Screen): Diagram or graph on LEFT, steps on RIGHT.
+     Use for: any math frame that also draws something — a free-body diagram, vectors,
+     a geometric figure, a timeline, a plot — beside the calculation that uses it.
+     A frame with a picture beside its steps is Layout B, not Layout A.
    - **Layout D** (Two-Panel Comparison): Two side-by-side columns.
      Use for: comparing two methods, before vs after, pros vs cons, two scenarios.
    - **Layout E** (Three-Panel Comparison): Three equal columns.

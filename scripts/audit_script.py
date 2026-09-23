@@ -73,6 +73,15 @@ COLOUR_WORDS = re.compile(
 # U+22EF crashes LaTeX outright; U+2212 crashes inside MathTex; U+2192 silently vanishes.
 RAW_MATH_GLYPHS = "⋯−→×·≤≥≠"
 CUE_RE = re.compile(r'[Oo]n "([^"]+)"')
+# A cue written as a list — `On "a", "b" and "c"` — is only HALF SEEN: CUE_RE needs `on `
+# before every quote, so "b" and "c" are never scheduled. The symptom is not a missing cue
+# but a reported DEAD SPAN over the words they cover, which reads as a staging bug in the
+# author's `visual` rather than a parsing artifact here, so the author "fixes" beats that
+# were never broken (one script had 10 quoted phrases, 8 matched, and one phantom 9.2 s
+# span). Leaving CUE_RE alone is deliberate — a quoted ON-SCREEN LABEL is also legitimately
+# not a cue — so this warns instead of widening the parse.
+CUE_LIST_RE = re.compile(r'[Oo]n "[^"]+"((?:\s*(?:,|and|then|or|&)\s*"[^"]+")+)')
+QUOTED_RE = re.compile(r'"([^"\n]+)"')
 
 # Severity. BLOCK = the frame cannot render as directed, or a number is provably wrong.
 # CHECK = a real finding the reviewer must judge (it may be correct as authored).
@@ -133,6 +142,22 @@ def audit_frame(frame, idx, cue_schedule=True):
         f.append((num, "no-cues", "reference schedules nothing"))
         _audit_tts(f, num, narration)
         return f, st
+
+    # Continuation phrases in a listed cue (see CUE_LIST_RE). Only flag one that occurs
+    # VERBATIM IN THE NARRATION and runs to 2+ words: a one-word or unspoken quote after a
+    # cue is an on-screen label, which is the common and legitimate case. Calibrated over
+    # 15,388 references: 14 hits in 3 lectures (~1 per 1,100), most of them real — e.g.
+    # 'write it down the second column'. A multi-word label the narration also
+    # happens to speak is genuinely ambiguous and is surfaced for the reviewer to judge.
+    for m in CUE_LIST_RE.finditer(ref):
+        for q in QUOTED_RE.findall(m.group(1)):
+            qn = norm(q).split()
+            if len(qn) < 2:
+                continue
+            if any(nw[i:i + len(qn)] == qn for i in range(len(nw) - len(qn) + 1)):
+                f.append((num, "cue-list-unscheduled",
+                          f'"{q[:45]}" follows a cue in a list, so nothing schedules it '
+                          f'(any dead span here is this, not your staging)'))
 
     spans = []
     for c in cues:
@@ -364,6 +389,11 @@ def self_test():
                         "visual": {"reference": 'On "We take" a box. On "finish the proof" a tag.'}}, "tts-digits"),
         ("math frame, no cues", {"number": 0, "frame_class": "math", "narration": good,
                                  "visual": {"reference": "A box appears."}}, "no-cues"),
+        # A listed cue: only the FIRST quote is parsed, so "and then we prove" is never
+        # scheduled and the gap it covers would be reported as the author's dead span.
+        ("listed cue", {"number": 0, "narration": good,
+                        "visual": {"reference": 'On "We begin", "and then we prove" a box. '
+                                                'On "carefully" a tag.'}}, "cue-list-unscheduled"),
     ]
     # A narration-only frame skips the reference checks but must still get the TTS checks.
     narr_only = [
@@ -379,8 +409,12 @@ def self_test():
     # both — the checks were right and the test case was not.
     clean_narr = (good + " That identity is the one we will lean on for the rest of this "
                   "video, and it is worth stating plainly before we go any further at all.")
+    # The clean control also carries a LISTED quote that is an on-screen label — "Leibniz
+    # rule" is written on the board and never spoken — which must NOT fire
+    # cue-list-unscheduled. That is the legitimate half of the CUE_LIST_RE shape.
     clean = {"number": 0, "narration": clean_narr,
-             "visual": {"reference": 'On "We begin" a title. On "the product rule" a box. '
+             "visual": {"reference": 'On "We begin" a title. On "the product rule", '
+                                     '"Leibniz rule" a box. '
                                      'On "prove it carefully" a tag. On "lean on" a chip.'}}
     f, _ = audit_frame(clean, 0)
     neg = not f

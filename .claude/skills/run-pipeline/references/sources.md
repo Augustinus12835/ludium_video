@@ -40,7 +40,7 @@ LaTeX (`$...$` / `$$...$$`), headings preserved, no commentary — written to
 Then scaffold the cleaning step (deterministic extraction + prompt emission — no API):
 
 ```bash
-venv/bin/python scripts/clean_book_chapter.py inputs/book/chapter02.md --pipeline BOOK [--chapter N] [--profile physics] [--attribution "..."] > /tmp/book_clean_meta.json
+venv/bin/python scripts/clean_book_chapter.py inputs/book/chapter02.md --pipeline BOOK [--chapter N] [--profile physics] [--attribution "..."] > <scratch>/book_clean_meta.json
 ```
 
 It writes `source_extracted.txt` + `clean_prompt.txt` into `pipeline/<dir>/` and prints meta
@@ -70,7 +70,7 @@ own words — check the rights on your source deck before publishing anything pr
 it.
 
 ```bash
-venv/bin/python scripts/clean_slides_pptx.py inputs/slides/Course_Ch05.pptx --pipeline <PREFIX> --emit-prompt > /tmp/pptx_clean_meta.json
+venv/bin/python scripts/clean_slides_pptx.py inputs/slides/Course_Ch05.pptx --pipeline <PREFIX> --emit-prompt > <scratch>/pptx_clean_meta.json
 ```
 
 Writes `slides_extracted.txt`, `source_info.json`, `clean_prompt.txt` into the pipeline dir

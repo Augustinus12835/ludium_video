@@ -165,7 +165,7 @@ label collisions) with a screenshot:
    overlapping a sibling), insufficient `buff=`, labels placed without checking
    the target's width, missing `scale_to_fit_width` on overflowable content.
    The catalogue of defects that render SUCCESS and are still wrong is
-   `templates/manim_system_prompt.md` rules 36–79 — check it before guessing.
+   `templates/manim_system_prompt.md` rules 36–80 — check it before guessing.
 4. Edit the Manim file with a targeted fix.
 5. Re-render the single frame:
    ```bash

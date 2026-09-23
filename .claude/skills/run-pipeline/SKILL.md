@@ -6,28 +6,25 @@ description: Run the Ludium Video production pipeline in --no-review mode and su
 # Ludium Video Pipeline Supervisor
 
 Produce finished videos from one piece of source material end to end: resolve the source,
-run the pipeline, fix failures, audit frames. The user invokes this to walk away. The deliverable is
+run the pipeline, fix failures, audit frames. The user invokes this to walk away, so the run
+is unattended — see "Running unattended" below. The deliverable is
 `pipeline/<L>/Video-N/final_video.mp4` + `subtitles.srt` per video.
 
-**The architectural rule: every LLM call is a subagent, never an LLM API** — clean, segment,
-script, math verification + color plan, and frame codegen. **Model routing: one scripting
-agent owns everything that decides what is SAID and what is SHOWN** — the script step
-(narration PLUS each frame's `visual` description) and script fixes coming out of review or
-verify_math (spoken text is `script.json` for every frame class — the verify_math
-`natural_narration` rewrite was retired 2026-08-30). Use your most capable available
-model for that scripting stage. **The producer agent does everything else** — SymPy
-verification, color plan, frame codegen, renders, and QA/audit (including applying QA-driven
-fixes). One author for spoken + shown means the two tracks can't disagree about what's
-factual or which half carries a detail. The scripting agent is spawned BY the orchestrator
-and reports back to it (Phase B1) — it is NOT nested inside the producer; the producer
-(Phase B2) is spawned only after the scripting artifacts exist on disk.
+**Every LLM step is a subagent, never an LLM API** — clean, segment, script, math
+verification, colour scheme/plan, frame codegen. `render_step_prompt.py` renders the exact
+prompt each step needs; the subagent works from that plus what a blind API call lacks
+(codegen gets a render→look→fix loop, math verification runs SymPy itself). `pipeline.py` is
+called only for deterministic slices (`--from X --to Y`: transcribe, tts, animate-render,
+compile, subtitle). The only paid external calls are ElevenLabs (TTS + Scribe). Use your most
+capable available model for every subagent, and pass it explicitly rather than relying on
+inheritance.
 
-`render_step_prompt.py` renders the byte-identical prompt each step expects; the subagent
-works from that plus the context a blind API call lacks — codegen gets a closed
-render→look→fix loop, math verification runs SymPy itself. Never invoke an LLM API for an
-LLM step; `pipeline.py` is called only for non-LLM slices (`--from X --to Y`: transcribe,
-tts, animate-render, compile, subtitle). The only paid external calls are ElevenLabs (TTS +
-Scribe transcription).
+**One agent owns the whole scripting stage per video** — everything that decides what is
+said and what is shown: `script.json` (narration + each frame's `visual`) and script fixes
+coming out of review or verification. A single author keeps the spoken and shown tracks from
+disagreeing, and a single writer keeps concurrent edits from clobbering `script.json`. The
+producer does everything else: verification, colour plan, codegen, renders, QA (including
+QA-driven fixes).
 
 ## Invocation
 
@@ -47,8 +44,8 @@ Scribe transcription).
 - **An existing pipeline dir or `Video-N` path** → resume in place (`pipeline.py`
   auto-detects state; single video runs via `pipeline.py video`).
 
-If the spec is ambiguous, pick the most likely match, state your interpretation, and proceed —
-only stop if it's genuinely unparseable.
+If the spec is ambiguous, pick the most likely match, state your interpretation, and proceed;
+stop only if it's unparseable.
 
 **Mode routing.** `--math` for pure math (auto-detected from folder prefixes like
 `Calculus_`, `Linear_Algebra_`, `Statistics_`, `Probability_`, `Differential_Equations_`);
@@ -59,36 +56,34 @@ required — there is no default mode.
 
 ## How it runs
 
-**Phase A — source-level prep, orchestrator, once**: transcribe → clean → coverage gate →
-segment. **Phase B1 — scripting stage, one scripting subagent per video, reporting to the
-orchestrator**: the script (narration + every frame's `visual`). The orchestrator runs the
-script-review loop in the middle: it spawns a clean-context reviewer and relays the issue
-list to the scripting agent via `SendMessage` — both report to the orchestrator, so the
-relay is direct (no nested-agent dead ends). **Phase B2 — production, one producer subagent
-per video**: spawned only after B1 returns; it takes the finished script through
-verification, codegen, render, compile, subtitle, and frame audit. A fresh subagent per
-video keeps each context clean and focused. Run multi-video sources in parallel batches of
-~3 (4K renders are CPU-heavy); B1 agents may also run in parallel, and each video's B2
-starts as soon as its B1 returns.
+- **Phase A — source-level prep, orchestrator, once:** transcribe → clean → coverage gate →
+  segment → colour scheme.
+- **Phase B1 — scripting, one agent per video, reporting to the orchestrator:** the script;
+  the orchestrator runs the review relay in the middle.
+- **Phase B2 — production, one producer per video:** spawned only once B1's artifacts are on
+  disk; takes the video through verification, codegen, render, compile, subtitle and frame
+  audit.
 
-Run long `pipeline.py` slices in the background, tee output to `/tmp/run_pipeline_logs/`,
-and watch with `Monitor`.
+A fresh agent per video keeps each context focused. Run multi-video sources in parallel
+batches of ~3 (4K renders are CPU-heavy); B1 agents may also run in parallel, and each video's
+B2 starts as soon as its B1 returns. Run long `pipeline.py` slices in the background, tee to
+`/tmp/run_pipeline_logs/`, and watch with `Monitor`.
 
 ### Phase A
 
-Skip any step whose output already exists (same resume detection as `pipeline.py`). Book
-and PPTX sources arrive with `content_cleaned.txt` — start at segment.
+Skip any step whose output already exists. Book and PPTX sources arrive with
+`content_cleaned.txt` — start at segment.
 
-1. **transcribe** —
+1. **transcribe**
    ```bash
    venv/bin/python scripts/pipeline.py run "<URL-or-folder>" --from transcribe --to transcribe --no-review [mode]
    ```
    With a YouTube URL whose title makes a poor folder name, add `--folder <Name>`. If the
-   lecturer's official notes/handout exist, save them as Markdown at
-   `pipeline/<L>/source_lecture_notes.md` NOW — `render_step_prompt.py clean|script` inject
-   them automatically as ground truth for every equation and worked example (an ASR
-   transcript never sees the board).
-2. **clean** (subagents, one per chunk, in parallel) — render each chunk's exact prompt:
+   lecturer's official notes or handout exist, save them as Markdown at
+   `pipeline/<L>/source_lecture_notes.md` now — `render_step_prompt.py clean|script` inject
+   them as ground truth for every equation and worked example (the transcript never sees the
+   board).
+2. **clean** — one subagent per chunk, in parallel:
    ```bash
    # chunk count:
    venv/bin/python -c "import json,pathlib; from scripts.clean_transcript import extract_full_text; from scripts.render_step_prompt import chunk_text; t=json.loads(pathlib.Path('pipeline/<L>/transcript.json').read_text()); x=extract_full_text(t); print(len(chunk_text(x,25000)) if len(x)>=30000 else 1)"
@@ -96,150 +91,154 @@ and PPTX sources arrive with `content_cleaned.txt` — start at segment.
    venv/bin/python scripts/render_step_prompt.py clean --transcript pipeline/<L>/transcript.json --chunk-index <i>
    ```
    Each subagent returns only its cleaned text; join with `\n\n` → `content_cleaned.txt`.
+   Give each chunk agent a chunk-namespaced file for its rendered prompt (`c<i>_prompt.json`):
+   they share the lecture dir, and a generic name gets overwritten by a sibling, which
+   silently cleans the wrong span.
+
    **Dated course?** (finance/economics whose evidence is market data) Append
-   `--refresh-figures --recorded "<when>"` to every chunk render (full policy in CLAUDE.md,
-   "Dated lectures"): worked-example inputs stay frozen, period facts get an explicit date,
-   currency-claiming figures are web-searched against a primary source and logged to
-   `figure_updates.json`, which the `script` step then injects automatically. Each chunk emits
-   its own JSON block: strip them from the prose, MERGE the lists into one
-   `pipeline/<L>/figure_updates.json`, then gate with `scripts/audit_figure_updates.py
-   pipeline/<L>` before segment — a BLOCK is a logged figure the prose does not carry (the
-   agent researched it and then cut or rewrote the sentence) or an entry with no `source_url`;
-   drop or re-clean it, never leave it for the script stage to narrate. Budget ~200 WebSearch
-   calls per session — a 20-lecture course exhausts it, after which agents can still `WebFetch`
-   a named primary domain but lose discovery, so front-load the lectures richest in live
-   figures. **Give each chunk agent a chunk-NAMESPACED name for its rendered prompt**
-   (`c<i>_prompt.json`): parallel chunk agents share the lecture dir, and a generic `user.txt`
-   gets clobbered mid-run — which silently cleans the WRONG span.
-3. **Coverage gate (required before segment).** Cleaning compresses but must never lose
-   coverage — a clean subagent can silently drop the tail. Verify: (a) the last ~400 words
-   of source and of `content_cleaned.txt` reach the same closing material; (b) `wc -w`
-   both — cleaned text lands at ~55–70% of source; below ~45% or a chunk-sized hole means a
-   dropped span, not aggressive editing. **The band is advisory, not a verdict**: a lecture
-   that is genuinely mostly administration cleans far lower and is still correct (an intro
-   lecture of syllabus and grading landed at 36.7% with its tail reaching the true closing
-   thought), and a dense lecture whose agent legitimately recovered slide content the
-   lecturer pointed at can exceed 75%. Judge (a), (d) and span affinity before the ratio;
-   (c) every chunk `0..N-1` made it into the join;
-   **(d) every chunk SEAM joins grammatically** — a-c all pass while a sentence is torn in
-   half at a boundary, because each chunk agent assumes the other wrote the missing part. On
-   one lecture the join read "…float ```\n\nof hours, colon, number of minutes, colon, number
-   of seconds." — the head of that sentence was written by neither chunk, and it survived into
-   `content.txt` and `segments.json` before a script reviewer caught it. Cheap sweep: flag
-   every paragraph opening lowercase or mid-clause —
+   `--refresh-figures --recorded "<when>"` to every chunk render (policy: CLAUDE.md "Dated
+   lectures"). Strip each chunk's JSON block from the prose, merge the lists into one
+   `pipeline/<L>/figure_updates.json`, and gate with `scripts/audit_figure_updates.py
+   pipeline/<L>` before segment — resolve every BLOCK (drop the entry or re-clean) rather than
+   leaving it for the script stage. WebSearch is limited to ~200 calls per session, so
+   front-load the lectures richest in live figures.
+3. **Coverage gate** (every source type, before segment). A clean agent can silently drop a
+   span or the tail. Check, in this order of weight:
+   (a) the last ~400 words of source and cleaned text reach the same closing point;
+   (b) every chunk `0..N-1` is in the join;
+   (c) every chunk seam joins grammatically — each chunk agent may assume the other wrote the
+   bridging sentence. Sweep for paragraphs that open lowercase or mid-clause and read each hit
+   (most are legitimate prose continuing around a code block):
    ```python
    for i, para in enumerate(text.split("\n\n")):        # skip fenced blocks and md markers
        w = para.strip().split()[:1]
        if w and w[0][0].islower() and w[0] not in ("a", "an", "the"): print(i, para[:90])
    ```
-   Most hits are legitimate prose continuing around a code block (10 of 11 were, on that
-   lecture), so read each one — but a genuine tear is unmistakable. Re-clean any missing span
-   before proceeding. Applies to every source type.
+   (d) `wc -w` ratio: lectures usually clean to ~55–70% of source. It is advisory — an
+   administrative intro lecture can land far lower and still be complete — but below ~45%, or
+   a chunk-sized hole, means a dropped span. Re-clean any missing span.
 4. **segment** — very short content (a single self-contained chapter or question) can skip
    straight to `segment_concepts.py pipeline/<L> --single-video`. Otherwise:
-   `render_step_prompt.py segment --content pipeline/<L>/content_cleaned.txt` → one
-   subagent returns anchor-based JSON → save it →
-   `segment_concepts.py pipeline/<L> --apply <response>`. On "Anchor split failed",
-   re-spawn the subagent with the error appended.
-5. **colour scheme (REQUIRED, before any script is authored).** Colour is a LECTURE-WIDE
-   decision made ONCE, here, by the orchestrator — not per video, and not after the fact.
-   Render the prompt, spawn ONE subagent, save its JSON verbatim:
+   `render_step_prompt.py segment --content pipeline/<L>/content_cleaned.txt` → one subagent
+   returns anchor-based JSON → save → `segment_concepts.py pipeline/<L> --apply <response>`.
+   On "Anchor split failed", re-spawn with the error appended.
+5. **Colour scheme (before any script).** Colour is decided once per lecture so a quantity
+   can't change colour between videos:
    ```bash
    venv/bin/python scripts/render_step_prompt.py color_scheme --pipeline-dir pipeline/<L>
-   #   → subagent returns {name: {color, tex, note_words, scope}} → pipeline/<L>/color_scheme.json
+   #   → one subagent returns {name: {color, tex, note_words, scope}} → pipeline/<L>/color_scheme.json
    ```
-   From then on it is plumbed automatically: `render_step_prompt.py script` injects it as
-   **background** for the scripting agent (so `visual` text names *quantities*, never colour
-   words), and every video's `render_step_prompt.py color_plan` injects it as a **binding
-   inheritance**. Loading it warns on stderr about a non-Manim colour constant, a reserved
-   WHITE/YELLOW, a duplicate colour, or a missing one — fix those before scripting, since a
-   bad constant otherwise surfaces only in a 4K render hours later. The scheme is
-   lecture-level because a per-video choice let the script author hard-code colour words into
-   `visual` that fought the producer's plan, and let one quantity change colour between
-   videos while every video's own lint passed.
+   From then on the `script` render injects it as background (so `visual` text names
+   quantities, not colours) and each video's `color_plan` render injects it as binding. Fix any
+   stderr warning it prints on load (non-Manim constant, reserved WHITE/YELLOW, duplicate or
+   missing colour) before scripting. Check that every quantity appearing in ≥3 videos made it
+   into the scheme, even if that spends GREEN/RED_C or exceeds seven entries; a recurring
+   quantity left out gets a different colour from each producer. If one must stay out, name it
+   and its colour in the scheme's `scope` text.
 
 ### Phase B (per video) — B1 scripting → review relay → B2 production
 
-The playbook is split into **Stage 1 (scripting)** and **Stage 2 (production)**; pass the
-video path, the mode, and the playbook to both:
+The playbook is split into Stage 1 (scripting) and Stage 2 (production):
 [references/phase-b.md](references/phase-b.md).
 
-B1 is a **conversation with one scripting agent**, not a fire-and-forget spawn:
+**Brief by reference.** Each agent's prompt names the video, mode and playbook stage to read,
+carries only the facts specific to this video (audit numbers, fixes already applied, the scope
+boundary against siblings, prior-lecture sources to check against), includes the standing
+instruction below, and stops. Don't paraphrase the playbook into the brief — the agent can read
+it, and a paraphrase drifts from it.
 
-1. Spawn the Stage-1 scripting agent (most capable model). It authors `script.json`
-   (narration + every frame's `visual`), regenerates `script.md`, and reports back to you.
-2. Run `scripts/audit_script.py pipeline/<L>/Video-N --siblings` FIRST — it does the
-   arithmetic half of the review (cue uniqueness, margins, gaps, scope gate, TTS, sibling
-   overlap) in seconds, tiered BLOCK/CHECK. Then spawn the clean-context reviewer, hand it
-   that output, and tell it not to redo those checks — its tokens go to the maths, the fit
-   simulation, source fidelity, pedagogy and prose. Relay its issue list
-   to the scripting agent via `SendMessage` — the scripting agent owns every script-content
-   fix (narration AND visual); you may apply purely mechanical fixes (frame numbering,
-   `metadata.frame_count`) yourself. Bounded to 2 rounds.
-3. On pass: B1 is done. Spawn the Stage-2 producer to finish the video (verification,
-   codegen, render, compile, subtitle, audit). Track which `agentId` owns which video at
-   spawn time.
+B1 is a conversation with one scripting agent:
 
-**Give every Stage-1 agent this narration-style rule.** Mannered prose substitutes metaphor
-and flourish for direct statement. Instead of "a parameter worth varying" the mannered writer
-produces "a dial worth turning"; instead of "this point still matters", "this point earns its
-keep". The phrases exist to display the writer, not to convey the idea, and readers can tell —
-which is why mannered prose irritates: it makes the reader work harder so the writer can
-perform. It is also imprecise, because metaphors drag in connotations the writer did not choose
-and cannot control. **The fix is to say what you mean; when a literal phrase is available, use
-it.**
+1. Spawn the Stage-1 scripting agent. It writes `script.json`, regenerates `script.md`, and
+   reports back.
+2. Run `scripts/audit_script.py pipeline/<L>/Video-N --siblings` yourself (seconds; tiered
+   BLOCK/CHECK — cue uniqueness, margins, gaps, scope gate, TTS, metadata, sibling overlap).
+   Then spawn one clean-context reviewer with that output and tell it not to redo those checks;
+   its effort goes to the maths, fit simulation, source fidelity, pedagogy and prose. Relay the
+   combined issue list to the scripting agent via `SendMessage`; it applies every content fix.
+   You may apply purely mechanical fixes (frame numbering, `metadata.frame_count`) yourself.
+   At most 2 rounds.
+3. On pass, spawn the Stage-2 producer. Record which agent owns which video.
 
-Two reasons this bites harder here than in ordinary writing:
-- **Narration is heard once, not read.** A viewer cannot re-read a clause to work out which
-  half was literal. A figure of speech that a reader would decode in a beat becomes a sentence
-  the listener simply loses.
-- **In a technical lecture the metaphor's stray connotations are often FALSE.** "The parent
-  hands the method down" suggests a copy is transferred; "Python reaches up the chain" suggests
-  a search cost — both invent mechanics the code does not have, and a viewer who takes them
-  literally has learned something wrong. Say "the subclass does not define `__str__`, so Python
-  uses the parent's."
+The reviewer is the one deliberate second opinion in the pipeline. Don't add further
+verification agents — every agent here checks its own work.
 
-This is not a ban on imagery: an analogy that is *doing work* (a blueprint versus the houses
-built from it) is fine, and naming it as an analogy costs three words. The target is decoration
-— a verb chosen for colour where a plain one was available, a flourish in a summary sentence, a
-metaphor reached for because the literal statement felt flat. Flag it in review the same way as
-any other defect (see the playbook's review step), and prefer the author's own rewrite: a
-reviewer's replacement prose is unverified, and a nit that adds an explanatory aside has
-introduced a provable falsehood before now.
+Both stages re-check disk state and skip completed steps (a resumed video may start at B2).
+Each stage's return includes a **`source errors corrected`** list — errors in the source
+content, not the script.
 
-Both stages re-check disk state and skip completed steps (a resumed video may start straight
-at B2). The producer's return includes a **`source errors corrected`** list — errors that
-originate in the source content, not in the script; the scripting agent reports any it finds
-at script time the same way.
+**Propagate source corrections (orchestrator, serially, after each video returns).** For each
+reported source error, re-check the corrected value, edit both
+`pipeline/<L>/content_cleaned.txt` and `pipeline/<L>/Video-N/content.txt`, and grep for stale
+copies. Do this in the orchestrator — `content_cleaned.txt` is shared.
 
-**Propagate source corrections (orchestrator, serially, after each video returns).** For
-each reported source error: re-verify the corrected value yourself, then edit BOTH
-`pipeline/<L>/content_cleaned.txt` and `pipeline/<L>/Video-N/content.txt`, and grep to
-confirm no stale copy remains. Do this in the orchestrator, not the parallel subagents —
-`content_cleaned.txt` is shared.
+## Narration style
+
+Give this rule to every Stage-1 agent and reviewer. **Say what you mean; when a literal
+phrase is available, use it.** Mannered prose swaps a direct statement for a metaphor or
+flourish — "a dial worth turning" for "a parameter worth varying", "earns its keep" for
+"still matters". It matters more here than in print for two reasons:
+
+- Narration is heard once. A listener can't re-read a clause to work out which half was
+  literal, so a figure a reader would decode in a beat is a lost sentence.
+- In technical material the metaphor's connotations are often false. "The parent hands the
+  method down" implies a copy; "Python reaches up the chain" implies a search cost. Say "the
+  subclass does not define `__str__`, so Python uses the parent's."
+
+An analogy that does real work (a blueprint versus the houses built from it) is fine; name it
+as an analogy. Reviewers flag decoration as a defect with its location and why the literal
+version is better, and leave the rewrite to the author — reviewer-supplied prose is unverified
+and has introduced falsehoods before.
+
+## Running unattended
+
+The user is away, so nobody answers mid-run questions. This applies to you and to every agent
+you spawn.
+
+**Standing instruction — include it in every subagent brief:**
+
+> You are running unattended; nobody will answer a question until the job is done. A message
+> with no tool call ends your turn and stops the work. Don't end a turn with a summary that
+> announces the next step, an offer to continue, or a list of decisions that don't actually
+> block you — make the routine call yourself and do the next thing. Status notes are fine in
+> the same message as your next tool call. Stop only when your stage's return is complete, or
+> when something genuinely needs the orchestrator (a missing input, a failure you've tried 3
+> times, a paid action outside your stage). Destructive or outward-facing actions still need
+> the confirmation this playbook specifies.
+
+**When a subagent's turn ends,** treat its text as a report, not proof it finished. Check its
+artifacts on disk against its stage's return list. If items are open and no blocker is stated,
+`SendMessage` it naming them ("still open: frames 7 and 9 unrendered, subtitle not run —
+continue; if blocked, say by what"). After 2–3 such nudges on the same video, take over from
+disk state or surface it. If something it started is still running (a render, a background
+command), wait for it before judging. Liveness checks are in
+[references/recovery.md](references/recovery.md).
+
+**You follow the same rule.** Keep going between videos without pausing to report; the user
+reads the wrap-up. Stop early only for the cases in Recovery below.
 
 ## Recovery
 
-The pipeline is fully resumable from disk state: read the log tail, identify the failure
-class, apply a targeted fix, resume — never restart from scratch. At most 3 recovery
-attempts per failing step; after that surface to the user with the error tail, what you
-tried, and your next hypothesis. Playbooks for the known failure classes (Manim render
-errors, the pre-TTS narration gate, API overloads, compile/subtitle issues):
+The pipeline resumes from disk state: read the log tail, identify the failure class, apply a
+targeted fix, resume — never restart from scratch. At most 3 recovery attempts per failing
+step; then surface to the user with the error tail, what you tried, and your next hypothesis.
+Playbooks for the known failure classes (Manim render errors, the pre-TTS narration gate, API
+overloads, compile/subtitle issues, stale renders, session limits, agent liveness):
 [references/recovery.md](references/recovery.md).
 
-## Frame audit — per video, as each one finishes
+## Frame audit — per video, as each finishes
 
-Frames are generated without vision, so once a video's `final_video.mp4` exists, run the
-frame audit: `audit_frames.py` contact sheets + full-res busy-moment stills, fix
-high-confidence defects in the frame source, re-render, recompile. Keep it bounded — the
-user still does a final pass.
+Frames are generated without vision, so once a video's `final_video.mp4` exists the producer
+runs the frame audit (`audit_frames.py` contact sheets + full-res busy-moment stills), fixes
+high-confidence defects in the frame source, re-renders and recompiles. Keep it bounded — the
+user does a final pass.
 
 ## Wrap-up
 
-- Status table per video: `final_video.mp4` (size, duration); note frames that needed
-  manual recovery and any source errors corrected.
+- Status table per video: `final_video.mp4` (size, duration); frames that needed manual
+  recovery; source errors corrected.
 
 ## Boundaries
 
-Writes stay under `pipeline/<L>/` and `/tmp/run_pipeline_logs/`. Never write `inputs/`
-(except the one-off book-chapter conversion in sources.md) or `.env`.
+Writes stay under `pipeline/<L>/`, `/tmp/run_pipeline_logs/` and the session scratchpad.
+Never write `inputs/` (except the one-off book-chapter conversion in sources.md) or `.env`.
