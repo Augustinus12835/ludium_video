@@ -523,10 +523,104 @@ def chapter_title_to_dir_name(prefix: str, num: int, title: str | None) -> str:
     return dir_name
 
 
+# --- Commentary profile (a humanities companion book → episode dossier) -----
+# Worked example: Sean McAleer, Plato's 'Republic': An Introduction (Open Book
+# Publishers 2020, CC BY 4.0) — obp_pdf_to_markdown.py → sec_CC_SS.md, divided into
+# episodes by an episode manifest (docs/examples/plato_republic_episodes.json).
+# Unlike the STEM profiles the output is NOT the thing the narrator speaks: a folio
+# content_cleaned.txt is a research DOSSIER with [P1]…[Pn] IDs that the argument
+# step maps and the script step narrates at ~75%. So the clean is light — strip the
+# book's apparatus, resolve its cross-references, keep every argument, quotation and
+# Stephanus number — and it must not paraphrase the book into a script. The prompt
+# below is written for the Republic companion; adapt its KEEP list (quotation
+# references, argument blocks, source-language terms) to another commentary.
+
+COMMENTARY_SYSTEM_PROMPT = """\
+You are a research editor preparing part of a philosophy companion book as the \
+research dossier for one ~20-minute documentary episode. The source is Sean \
+McAleer, Plato's 'Republic': An Introduction (Open Book Publishers, 2020, CC BY \
+4.0), a commentary that walks through the Republic book by book. A separate \
+writer will build the episode's argument and narration FROM your dossier, citing \
+its paragraphs, so your job is fidelity and self-sufficiency, not style: every \
+argument, objection, reconstruction, example and quotation survives, and nothing \
+in the text depends on a book the viewer does not have."""
+
+COMMENTARY_CLEANING_PROMPT = """\
+Edit this part of a commentary on Plato's Republic into a clean research \
+dossier for one documentary episode. Keep the author's substance and order; \
+change only what the list below names. The result is read by a scriptwriter, \
+not spoken, so do not rewrite it into narration.
+
+## REMOVE completely:
+- Book apparatus: "In this chapter we will…", "in the next chapter", "as \
+mentioned in the Introduction", "see Chapter Nine", "above"/"below" when they \
+point at a page, figure numbers, and "Some Suggestions for Further Reading".
+- Classroom asides about the author's own teaching or students, unless they \
+carry an argument or example.
+
+## KEEP and preserve EXACTLY:
+- **Every quotation from the Republic** (or another ancient text) word for word, \
+with its Stephanus reference in parentheses — (1.327a), (7.515a), (10.607c). The \
+references let the episode put the exact line on screen. Never lengthen a \
+quotation or supply more of the translation from memory.
+- **Every standard-form argument** (`> P1: …`, `> P2: …`, `> C: …`, starred \
+variants `P1*`) as the same `> ` block, labels and wording unchanged, with the \
+prose that introduces and assesses it. These reconstructions are the spine of \
+the episode's visuals.
+- **Every argument, objection, reply and assessment** the author gives, \
+including where he judges an argument valid, sound, or flawed and why, and the \
+responses he says an interlocutor could have made. Do not soften a verdict.
+- **Greek terms** with their transliteration: δικαιοσύνη (dikaiosunê), \
+τέχνη (technê).
+- **Historical and dramatic context** (dates, people, the Thirty, the \
+Peloponnesian War, Socrates' trial) and the author's modern examples and \
+analogies (films, psychology findings, games). They are research; the \
+scriptwriter decides what to use.
+- **Every `##` heading**, verbatim with its Stephanus range. A coverage check \
+compares headings with the source.
+
+## TRANSFORM:
+- **Cross-references to other chapters** of the commentary become their \
+content in a clause: not "as we saw in Chapter Three" but "as Glaucon's \
+challenge in Book II showed". A pointer to later material becomes a light \
+forward reference to the Republic itself ("a question Book VII returns to"). \
+Never leave a chapter number.
+- **The author's first person.** Where "I" introduces an interpretation or a \
+verdict, keep it as the author's stance so it stays marked as interpretation, \
+not fact: "McAleer argues…", "On McAleer's reading…". Where "I"/"we" is only \
+a signpost ("we now turn to…"), drop it. Coinages he flags as his own ("I have \
+dubbed it the error argument") keep their credit once.
+- **Figures** (`> Fig. N. caption`): replace with one or two sentences that say \
+what the diagram shows (what is drawn, the labels, the proportions) beside the \
+prose that uses it. Drop image credits.
+- Hyphenation left over from the page layout ("under-valued") → the normal \
+spelling.
+
+## RULES:
+- Do not add facts, dates or quotations that are not in the text. If you notice \
+a genuine factual error, correct it inline and report it after the text as \
+`<!-- CORRECTION: … -->`; never leave a "(Source note: …)" parenthetical.
+- Expect the output to be 90–100% of the input's length. Shorter means content \
+was dropped.
+- Plain Markdown: `##` headings, paragraphs, `> ` blocks. No title line, no \
+licence header, no summary of your own.
+
+---
+
+SECTION TEXT:
+{text}
+
+---
+
+CLEANED DOSSIER:"""
+
+
 def _profile_prompts(profile: str) -> tuple[str, str]:
     """Return (system_prompt, cleaning_prompt) for the cleaning profile."""
     if profile == "physics":
         return PHYSICS_SYSTEM_PROMPT, PHYSICS_CLEANING_PROMPT
+    if profile == "commentary":
+        return COMMENTARY_SYSTEM_PROMPT, COMMENTARY_CLEANING_PROMPT
     return SYSTEM_PROMPT, BOOK_CLEANING_PROMPT
 
 
@@ -577,7 +671,7 @@ def emit_prompt_for_chapter(input_path: Path, args) -> None:
         sys.exit(1)
 
     fmt = detect_format(input_path)
-    if args.profile == "physics":
+    if args.profile in ("physics", "commentary"):
         # Light pass that preserves LaTeX; aggressive stripping corrupts math.
         preprocessed = _light_markdown_preprocess(raw)
     else:
@@ -621,9 +715,13 @@ def emit_prompt_for_chapter(input_path: Path, args) -> None:
 #    "profile": "physics",
 #    "sources": [{"chapter": 4, "sections": ["4.1", "4.2"]}, {"chapter": 5}],
 #    "source": {"title": "...", "url": "...", "license": "..."}}   # optional
-# "sections" omitted / "all" / "*" takes the whole chapter. A top-level
-# "source" block in a single-file manifest applies course-wide and is written
-# to source_info.json.
+# "sections" omitted / "all" / "*" takes the whole chapter; {"file": "sec_01_02"}
+# names a markdown basename instead of a chapter number, and "drop_end_matter":
+# false keeps a file whole. A top-level "source" block (and "attribution" text) in
+# a single-file manifest applies course-wide: the source block is written to
+# source_info.json, the attribution heads content_cleaned.txt. An episode manifest
+# for a humanities book is the same format — see
+# docs/examples/plato_republic_episodes.json.
 # ---------------------------------------------------------------------------
 
 def _resolve_chapter_md(book_dir: Path, chapter: int) -> Path:
@@ -675,7 +773,8 @@ def compose_unit_source(book_dir: Path, sources: list[dict], verbose=False) -> s
     return "\n\n".join(parts)
 
 def emit_prompt_for_unit(manifest: dict, book_dir: Path, args,
-                         course_source: dict | None = None) -> None:
+                         course_source: dict | None = None,
+                         course_attribution: str | None = None) -> None:
     """Compose a unit's source and render its cleaning prompt for a subagent.
 
     Writes source_extracted.txt, clean_prompt.txt (and source_info.json when the
@@ -693,7 +792,7 @@ def emit_prompt_for_unit(manifest: dict, book_dir: Path, args,
     if args.verbose:
         print(f"      composed source: {len(raw):,} chars")
 
-    preprocessed = (_light_markdown_preprocess(raw) if profile == "physics"
+    preprocessed = (_light_markdown_preprocess(raw) if profile in ("physics", "commentary")
                     else preprocess(raw, "markdown"))
     system, prompt_template = _profile_prompts(profile)
     user = prompt_template.format(text=preprocessed)
@@ -708,7 +807,7 @@ def emit_prompt_for_unit(manifest: dict, book_dir: Path, args,
         (pdir / "source_info.json").write_text(
             json.dumps(src, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    attribution = manifest.get("attribution") or args.attribution
+    attribution = manifest.get("attribution") or course_attribution or args.attribution
     meta = _meta(pdir, preprocessed, title, attribution, profile, unit=unit)
     print(json.dumps(meta, ensure_ascii=False, indent=2))
 
@@ -743,9 +842,11 @@ def main():
                              "(required unless --manifest)")
     parser.add_argument("--chapter", type=int, metavar="NUM",
                         help="Override chapter number (otherwise extracted from filename/content)")
-    parser.add_argument("--profile", choices=["general", "physics"], default="general",
+    parser.add_argument("--profile", choices=["general", "physics", "commentary"], default="general",
                         help="Cleaning profile: 'physics' preserves equations + figure context "
-                             "for math-heavy books feeding Manim/SymPy; 'general' is prose-oriented")
+                             "for math-heavy books feeding Manim/SymPy; 'commentary' is a light "
+                             "clean of a humanities companion book into a folio research dossier; "
+                             "'general' is prose-oriented")
     parser.add_argument("--attribution", metavar="TEXT", default="open-source textbook",
                         help="Source attribution for the content_cleaned.txt header comment, "
                              "e.g. 'Book Title (CC-BY-SA 4.0)' (default: %(default)r)")
@@ -768,14 +869,15 @@ def main():
     if args.manifest:
         manifest_path = Path(args.manifest)
         # Course-level source block (for source_info.json), if present in a single file.
-        course_source = None
+        course_source = course_attribution = None
         if manifest_path.is_file():
             try:
                 _raw = json.loads(manifest_path.read_text(encoding="utf-8"))
                 if isinstance(_raw, dict):
                     course_source = _raw.get("source")
+                    course_attribution = _raw.get("attribution")
             except Exception:
-                course_source = None
+                course_source = course_attribution = None
         manifests = load_manifests(manifest_path)
         if args.unit:
             manifests = [m for m in manifests if m.get("unit") == args.unit]
@@ -786,7 +888,8 @@ def main():
             print("Error: prompt emission handles one unit at a time — pick one with "
                   f"--unit (available: {[m.get('unit') for m in manifests]})")
             sys.exit(1)
-        emit_prompt_for_unit(manifests[0], Path(args.book_dir), args, course_source)
+        emit_prompt_for_unit(manifests[0], Path(args.book_dir), args, course_source,
+                             course_attribution)
         return
 
     # --- Single-chapter mode --------------------------------------------------

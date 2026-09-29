@@ -1,0 +1,21 @@
+{
+  "name": "ludium-video-remotion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion render harness for folio (humanities) videos",
+  "scripts": {
+    "studio": "remotion studio"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.246",
+    "@remotion/fonts": "^4.0.246",
+    "@remotion/google-fonts": "4.0.246",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.246"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  }
+}

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-Script generation prompts (math and technical modes).
+Script generation prompts (math, technical and folio modes).
 
 script.json (structured data) + script.md (human-readable) are authored by a
 Claude Code subagent: render the mode's prompt with
-`render_step_prompt.py script --video-dir DIR --mode <math|technical>`, save
+`render_step_prompt.py script --video-dir DIR --mode <math|technical|folio>`, save
 the subagent's JSON to script.json, and regenerate script.md via
 script_parser.save_script. This module holds the prompt templates and the
 source/duration-hint builders that render_step_prompt.py imports.
 
 Pipeline position:
   segments.json + Video-N/content.txt
+      → [folio only: argument prompt → argument.json, reviewed (round 0)]
       → script prompt (this module, via render_step_prompt.py) → subagent
       → script.json (source of truth, structured data)
       → script.md (derived from JSON, for human review)
@@ -25,9 +26,380 @@ from typing import Dict
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.utils.tts_rules import (
+    ERA_MARKER_RULES,
     TECHNICAL_NARRATION_TTS_RULES,
     MATH_NARRATION_TTS_RULES,
 )
+
+
+# =============================================================================
+# HUMANITIES NARRATION — folio
+# =============================================================================
+# A humanities script is written from a RESEARCH DOSSIER (content.txt, paragraphs
+# numbered [P1]…[Pn]), not re-voiced from it, in two stages:
+#   1. `render_step_prompt.py argument` → Video-N/argument.json: thesis, 3–6
+#      movements with claim / evidence (P-ids, attested|inferred|disputed) / turn,
+#      an explicit cut list, best_of_source, keep_verbatim. A clean-context
+#      reviewer checks it against the dossier (review round 0).
+#   2. `render_step_prompt.py script --mode folio` injects the approved map and asks
+#      for narration at ~75% of the dossier's length, each frame tagged with its
+#      `movement` and `sources`.
+# audit_script.py then gates the prose mechanically (dossier-verbatim BLOCK,
+# overlap / ratio / unsourced-figure / filler / cadence / movement-shape CHECKs).
+# Written straight from its source, a script re-voices the lecture: one early
+# episode shared 20% of its 10-grams with its dossier (an identical run of 89
+# words) and reached its real thesis at frame 35 of 47.
+
+
+HUMANITIES_SCRIPT_MODES = ("folio",)
+DOSSIER_SELECTION_RATIO = 0.75     # narration words ≈ 0.75 × dossier words
+NARRATION_WPM = 150.0              # 2.5 words per second
+HUMANITIES_MIN_MINUTES = 15.0      # long-form floor (folio)
+HUMANITIES_MAX_MINUTES = 25.0
+ARGUMENT_FILENAME = "argument.json"
+
+
+def split_dossier_paragraphs(content: str) -> list:
+    """[(pid | None, text)] in dossier order. Blank-line-separated blocks get IDs
+    P1…Pn; a leading '#' line is a heading (pid None) and is never numbered.
+    The single numbering used by the argument prompt, the script prompt and
+    audit_script.py — change it here or the P-ids stop agreeing."""
+    out, n = [], 0
+    for block in re.split(r"\n\s*\n", content or ""):
+        lines = block.strip().split("\n")
+        while lines and lines[0].lstrip().startswith("#"):
+            out.append((None, lines.pop(0).strip()))
+        rest = "\n".join(lines).strip()
+        if rest:
+            n += 1
+            out.append((f"P{n}", rest))
+    return out
+
+
+def dossier_paragraph_map(content: str) -> Dict:
+    """{'P1': text, …} — headings excluded."""
+    return {pid: text for pid, text in split_dossier_paragraphs(content) if pid}
+
+
+def humanities_targets(content: str, mode: str = "folio") -> tuple:
+    """(target_minutes, target_words) for a humanities script.
+
+    folio (long-form, ~20-min videos):
+        minutes = clamp(dossier_words × 0.75 / 150, 15, 25)
+    `mode` is kept for callers.
+    """
+    words = len((content or "").split())
+    raw = words * DOSSIER_SELECTION_RATIO / NARRATION_WPM
+    minutes = max(HUMANITIES_MIN_MINUTES, min(HUMANITIES_MAX_MINUTES, raw))
+    return minutes, int(round(minutes * NARRATION_WPM))
+
+
+def build_dossier_block(segment_meta: Dict, content: str) -> str:
+    """The humanities stand-in for build_source_block: the same content, framed
+    as background research with citable paragraph IDs instead of 'the lecture
+    material this video must teach'."""
+    paras = split_dossier_paragraphs(content)
+    n = sum(1 for pid, _ in paras if pid)
+    body = "\n\n".join(f"[{pid}] {text}" if pid else text for pid, text in paras)
+    takeaways = segment_meta.get("key_takeaways") or []
+    notes = ""
+    if isinstance(takeaways, list) and takeaways:
+        notes = ("Segmenter's notes (a hint about what this part covers, not a checklist):\n"
+                 + "\n".join(f"- {t}" for t in takeaways) + "\n")
+    return (
+        "RESEARCH DOSSIER\n\n"
+        f"Working title (a label from the segmentation step, not your title): "
+        f"{segment_meta.get('title', 'Untitled')}\n"
+        f"Theme: {segment_meta.get('core_concept', '') or '(none given)'}\n"
+        f"{notes}"
+        f"Length: {len(content.split()):,} words in {n} numbered paragraphs.\n\n"
+        "The text below is background material assembled from lectures or a book. Treat it as "
+        "a dossier of established facts, evidence and scholarly positions — not as a text to "
+        "teach, follow, or compress. Its order is the author's order, not yours. Its asides, "
+        "examples and transitions are the author's, not yours; keep one only if it does work "
+        "in your argument. Paragraphs are numbered [P1]…[Pn] so you can cite them; a line starting "
+        "with \"#\" is a heading, not content.\n\n"
+        f"{body}"
+    )
+
+
+# --- Stage 1: the argument map ------------------------------------------------
+
+ARGUMENT_SYSTEM = (
+    "You are a documentary writer and historian planning a spoken script for an educational "
+    "documentary film. You work from a research dossier, the way a documentary writer works "
+    "from an academic consultant's notes: you own the argument, the structure and the "
+    "selection. This step decides the argument; the prose is written later, to your plan. "
+    "Output ONLY valid JSON."
+)
+
+_ARGUMENT_TASK = """WHAT THE MAP DECIDES
+- "thesis": one claim, in plain words, at most thirty words. A claim someone could dispute ("Sparta's famous discipline answered a fear of its own helots more than any love of war"), not a topic ("Spartan society").
+- "question": the question the film answers — the one a viewer asks after the cold open.
+- "cold_open" (about thirty seconds, ~75 words): a concrete image, number or tension FROM THE DOSSIER, the tension it sets up, and the sentence that turns it toward the thesis. Never a summary of what is coming.
+- "movements": three to six, in the order the ARGUMENT needs — the dossier's order only where that is also the argument's order. Each movement has the question it answers, its claim in one sentence, the evidence that supports the claim, the turn it ends on (what the viewer now understands that they did not a minute earlier), and a word budget. A movement runs ninety seconds to six minutes (~225–900 words).
+- "evidence" items carry the paragraph IDs they come from and how the dossier presents them: "attested" (a source says it), "inferred" (historians reason to it), or "disputed" (the dossier reports disagreement).
+- "cut": every paragraph you do not use, each with a one-line reason ("repeats P7", "lecturer's aside", "background the thesis does not need"). Never cut a cause, a reversal, a key date, or the lecturer's best insight.
+- "best_of_source": the three to five ideas this material is really about — the lecturer's sharpest insights, the things a specialist would be sorry to see dropped. Each is placed in a movement.
+- "debates_named": the scholarly disagreements the film names as disagreements — only ones the dossier itself presents as disputed.
+- "keep_verbatim": at most three phrasings from the dossier worth quoting word for word (a translated line, an ancient author's sentence, a memorable formulation). They will be spoken inside quotation marks; everything else is written fresh.
+- "ending": the resonance the thesis leaves — an image, consequence or open question the whole film has earned. Not a summary.
+
+RULES
+- Every evidence item cites real paragraph IDs, and that paragraph must actually say it. "common" is allowed only for uncontroversial common knowledge the dossier lacks (a well-known date, where a city lies) — never for a quotation, a named scholar, a statistic, or a contested claim.
+- Never attribute a view to "scholars" or to a named historian unless the dossier does.
+- Every paragraph ID appears at least once: in some evidence list (cold open and ending included) or in "cut".
+- Word budgets, cold open included, sum to roughly the target below.
+- The map is a plan, not a draft: about 600–900 words of JSON.
+
+OUTPUT (bare JSON, no markdown fences):
+{
+  "thesis": "...",
+  "question": "...",
+  "cold_open": {"image": "...", "tension": "...", "turn_to_thesis": "...", "sources": ["P3"], "word_budget": 75},
+  "movements": [
+    {"number": 1, "title": "...", "question_answered": "...", "claim": "...",
+     "evidence": [{"point": "...", "source": ["P12", "P13"], "kind": "attested"}],
+     "turn": "...", "word_budget": 500}
+  ],
+  "debates_named": [{"debate": "...", "source": ["P20"]}],
+  "cut": [{"id": "P7", "reason": "..."}],
+  "keep_verbatim": [{"text": "...", "source": "P15"}],
+  "best_of_source": [{"idea": "...", "source": ["P9"], "movement": 2}],
+  "ending": {"resonance": "...", "sources": ["P34"]},
+  "word_budget_total": 2400
+}"""
+
+_MODE_FILM = {
+    "folio": "a calm narrator over a book of illustrated plates",
+}
+
+
+def build_argument_prompt(segment_meta: Dict, content: str, mode: str = "folio") -> str:
+    """Stage-1 user prompt: plan the argument (argument.json), no prose."""
+    minutes, target_words = humanities_targets(content, mode)
+    words = len(content.split())
+    return (
+        f"You are planning the argument of a documentary-style educational film: "
+        f"{_MODE_FILM.get(mode, _MODE_FILM['folio'])}. It runs about {int(round(minutes))} "
+        f"minutes, ~{target_words:,} spoken words at 150 words a minute — "
+        f"{100 * target_words / max(words, 1):.0f}% of the dossier's {words:,} words, so "
+        "selection is part of the job. This step produces the ARGUMENT MAP only, no narration. "
+        "A reviewer checks the map against the dossier before any prose is written, and the "
+        "narration is then written to the approved map.\n\n"
+        + build_dossier_block(segment_meta, content)
+        + "\n\n---\n\n"
+        + _ARGUMENT_TASK.replace('"word_budget_total": 2400',
+                                 f'"word_budget_total": {target_words}')
+        + f"\n\nTARGET: ~{target_words:,} words in all.\n"
+    )
+
+
+def load_argument_map(video_dir) -> tuple:
+    """(argument dict | None, error string). Missing file → (None, '')."""
+    path = Path(video_dir) / ARGUMENT_FILENAME
+    if not path.exists():
+        return None, ""
+    raw = path.read_text(encoding="utf-8").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        raw = raw[4:] if raw.lower().startswith("json") else raw
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return None, f"{path} is not valid JSON ({e})"
+    if not isinstance(data, dict):
+        return None, f"{path} is not a JSON object"
+    return data, ""
+
+
+def _pids(value) -> list:
+    if isinstance(value, str):
+        return [value]
+    return [v for v in (value or []) if isinstance(v, str)]
+
+
+def validate_argument_map(arg: Dict, content: str, mode: str = "folio") -> list:
+    """Mechanical checks on an argument map — the arithmetic half of review round 0.
+    Returns a list of problem strings (empty = clean)."""
+    problems = []
+    paras = dossier_paragraph_map(content)
+    known = set(paras)
+    thesis = (arg.get("thesis") or "").strip()
+    if not thesis:
+        problems.append("no thesis")
+    elif len(thesis.split()) > 30:
+        problems.append(f"thesis is {len(thesis.split())} words (≤ 30)")
+    movements = arg.get("movements") or []
+    if not 3 <= len(movements) <= 6:
+        problems.append(f"{len(movements)} movements (need 3–6)")
+    used = set()
+    unknown = set()
+
+    def take(ids):
+        for p in _pids(ids):
+            if p == "common":
+                continue
+            (used if p in known else unknown).add(p)
+
+    take((arg.get("cold_open") or {}).get("sources"))
+    take((arg.get("ending") or {}).get("sources"))
+    for m in movements:
+        for ev in m.get("evidence") or []:
+            take(ev.get("source"))
+            if ev.get("kind") not in ("attested", "inferred", "disputed"):
+                problems.append(f"movement {m.get('number')}: evidence kind "
+                                f"{ev.get('kind')!r} (attested|inferred|disputed)")
+                break
+        wb = m.get("word_budget")
+        if isinstance(wb, (int, float)) and not 225 <= wb <= 900:
+            problems.append(f"movement {m.get('number')}: word_budget {wb} "
+                            "(a movement runs 90 s–6 min, ~225–900 words)")
+    for d in arg.get("debates_named") or []:
+        take(d.get("source"))
+    for b in arg.get("best_of_source") or []:
+        take(b.get("source"))
+    cut = set()
+    for c in arg.get("cut") or []:
+        pid = c.get("id") if isinstance(c, dict) else c
+        if isinstance(pid, str):
+            (cut if pid in known else unknown).add(pid)
+    if unknown:
+        problems.append("unknown paragraph IDs: " + ", ".join(sorted(unknown, key=_pid_key)))
+    unplaced = sorted(known - used - cut, key=_pid_key)
+    if unplaced:
+        problems.append(f"{len(unplaced)} paragraph(s) neither used nor cut: "
+                        + ", ".join(unplaced[:20]) + (" …" if len(unplaced) > 20 else ""))
+    both = sorted(used & cut, key=_pid_key)
+    if both:
+        problems.append("cited as evidence AND cut: " + ", ".join(both))
+    kv = arg.get("keep_verbatim") or []
+    if len(kv) > 3:
+        problems.append(f"{len(kv)} keep_verbatim phrasings (≤ 3)")
+    squash = lambda s: " ".join(re.sub(r"[^\w\s]", " ", s.lower()).split())
+    dossier_sq = squash(content)
+    for k in kv:
+        text = k.get("text", "") if isinstance(k, dict) else str(k)
+        if text and squash(text) not in dossier_sq:
+            problems.append(f"keep_verbatim not verbatim in the dossier: {text[:60]!r}")
+    bos = arg.get("best_of_source") or []
+    if not 3 <= len(bos) <= 5:
+        problems.append(f"{len(bos)} best_of_source ideas (need 3–5)")
+    _, target = humanities_targets(content, mode)
+    total = sum(m.get("word_budget") or 0 for m in movements
+                if isinstance(m.get("word_budget"), (int, float)))
+    total += (arg.get("cold_open") or {}).get("word_budget") or 0
+    if total and not 0.8 * target <= total <= 1.2 * target:
+        problems.append(f"word budgets sum to {total} (target ~{target}, ±20%)")
+    return problems
+
+
+def _pid_key(p: str):
+    m = re.match(r"P(\d+)$", p)
+    return (0, int(m.group(1))) if m else (1, p)
+
+
+# --- Stage 2: narration -------------------------------------------------------
+
+DOCUMENTARY_SCRIPT_SYSTEM = (
+    "You are a documentary writer and historian producing a spoken script for an educational "
+    "documentary film. You work from a research dossier, the way a documentary writer works "
+    "from an academic consultant's notes: you own the argument, the structure and every "
+    "sentence. You do not paraphrase the dossier; you use what it establishes. "
+    "Output ONLY valid JSON."
+)
+
+_STAGE2_HEADER = {
+    "folio": ("You are writing the narration for a documentary-style film: a calm narrator "
+              "over illustrations. The images are chosen later from your words; write only "
+              "what is spoken."),
+}
+
+_FRAME_RULE = {
+    "folio": ("One idea per paragraph. A frame is one paragraph of 60–120 words carrying one "
+              "idea; when the idea changes, the frame changes. Target {frame_count_hint}."),
+}
+
+_CRAFT = """WHAT YOU ARE MAKING. A structured, academically focused narration of about {target_minutes} minutes — ~{target_words} spoken words, {pct}% of the dossier's {dossier_words} — with:
+- One thesis, stated in plain words by the end of the cold open (about thirty seconds, ~75 words) and answered by the ending. The cold open is a concrete image, number or tension from the dossier, never a summary of what is coming.
+- Three to six movements, as in the argument map. Each opens with its claim in one sentence, supports it with specific evidence, and ends on a turn: something the viewer now understands that they did not a minute earlier. Signpost with content, not meta-talk: "The second reason lies in the schoolroom" is a signpost; "Now let's turn to" is not.
+- {frame_rule} A frame never straddles two movements.
+- Concrete evidence: names, dates, places, numbers, what a text or inscription actually says. Prefer the specific instance to the general statement.
+- Scholarly precision. Distinguish, in words, what the sources say, what historians infer, and what is disputed: "Aristotle reports…", "the inference is…", "scholars divide over…". Name a debate as a debate, once, where it matters; do not hedge every sentence. Never attribute a view to "scholars" that the dossier does not attribute; never invent a source, a quotation, a date, or a number. A fact not in the dossier is admissible only if it is uncontroversial common knowledge, and you must tag that frame's sources as "common".
+- Selection. Aim for ~{target_words} words. Cut what does not serve the thesis; the argument map's cut list is already agreed. Do not restore cut material for completeness, and never pad toward the length — a tighter film beats a padded one.
+- Silent correction. The dossier can be wrong. Where you are certain of an error of fact, narrate the correct fact without comment and report it to the orchestrator; never tell the viewer a source erred ("the source says…", "often given as…").
+
+VOICE (heard once, at 2.5 words per second):
+- Sentences average 10–14 words; almost none over 20; vary length deliberately.
+- Present tense for events and texts where it adds immediacy; past tense for chronology. Active voice.
+- No lecture filler ("as we'll see", "now,", "so,", "of course", "it is worth noting", "remember", "in this video"), no rhetorical questions, no sign-offs.
+- No "it's not X, it's Y" contrastives in any variant ("not just X, but Y") — say what the thing is. No pet abstractions ("framing", "machinery", "load-bearing").
+- Say what you mean: when a literal phrase exists, use it. An analogy that does real work is fine; name it as an analogy. State each point once.
+- Quote the dossier only where keep_verbatim allows, inside quotation marks, at most three times; otherwise no run of eight or more words identical to the dossier.
+- "We" only for something narrator and viewer do together; "you" only when the viewer must act. Contractions sparingly."""
+
+_SPOKEN_RULES_DOC = """SPOKEN-TEXT RULES (TTS — the narration is read aloud by a voice model):
+   - "narration" = ONLY the spoken words. No stage directions, no visual notes.
+   - Spell EVERY number and date out in English words. NO digits at all.
+     "490 BC" → "four hundred ninety"; "20,000 soldiers" → "twenty thousand soldiers";
+     "5th century" → "fifth century"; "1/3" → "one third".
+""" + ERA_MARKER_RULES + """
+   - No symbols (%, &, $, °, etc.) — write the word. Expand abbreviations ("vs." → "versus", "e.g." → "for example").
+   - No Unicode Greek letters — write the English word. Spell out or naturalize anything that would be mis-read; the spoken line must be pure pronounceable English."""
+
+_TITLE_META = """TITLE AND METADATA:
+- "title": an original title that states the thesis — not the working title.
+- "thesis": the approved thesis, verbatim from the argument map.
+- "metadata.key_concepts": 2–4 short phrases naming the essential ideas (thumbnails, video metadata); "metadata.requires_math": false.
+- "metadata.frame_count" = the number of frames; frame "number"s run 0, 1, 2, … with no gaps or repeats. Each frame's "word_count" = its narration's words; "metadata.word_count" = their sum; "timing" follows at 2.5 words per second, gapless.
+- COUNT ACCURATELY: any count the narration states ("three causes") equals the items it gives.
+- Per frame, "movement" = 0 for the cold open, then the argument map's movement number (1…N), never decreasing; "sources" = the dossier paragraph IDs the frame draws on (["P3", "P4"]), plus "common" whenever it states anything that is not in the dossier."""
+
+_OUTPUT = {
+    "folio": """OUTPUT (bare JSON, no markdown fences):
+{
+  "title": "...",
+  "thesis": "...",
+  "metadata": {"total_duration": "M:SS", "frame_count": N, "word_count": NNN, "target_wps": 2.5,
+               "key_concepts": ["...", "..."], "requires_math": false},
+  "frames": [
+    {"number": 0, "movement": 0, "sources": ["P3", "P4"],
+     "timing": {"start": "0:00", "end": "0:31", "start_seconds": 0, "end_seconds": 31},
+     "word_count": 78,
+     "narration": "...",
+     "visual": {"type": "scene", "reference": "one-sentence placeholder"}}
+  ]
+}""",
+}
+
+ARGUMENT_MISSING_BLOCK = """ARGUMENT MAP: none approved yet (no Video-N/argument.json). The two-stage process renders `render_step_prompt.py argument` first, has the map reviewed against the dossier, and writes to it. If you are writing without one, build the map yourself before any prose — thesis, three to six movements each with a claim, evidence (paragraph IDs) and a turn, and a cut list — and write to it."""
+
+
+def format_argument_block(arg: Dict) -> str:
+    return ("APPROVED ARGUMENT MAP (write to this; do not restructure it — its thesis, "
+            "movements, their order, its evidence and its cut list were reviewed against the "
+            "dossier):\n" + json.dumps(arg, indent=1, ensure_ascii=False))
+
+
+def humanities_frame_count_hint(mode: str, minutes: float, target_words: int) -> str:
+    return (f"about {max(8, target_words // 110)}-{max(12, target_words // 75)} frames for a "
+            f"~{int(round(minutes))} minute video")
+
+
+def build_humanities_script_prompt(mode: str, segment_meta: Dict, content: str,
+                                   argument_block: str) -> str:
+    """Stage-2 user prompt for folio."""
+    minutes, target_words = humanities_targets(content, mode)
+    words = len(content.split())
+    _, frame_count_hint = compute_duration_and_frame_hints(
+        "", content, humanities_mode=mode)
+    frame_rule = _FRAME_RULE[mode].format(frame_count_hint=frame_count_hint)
+    craft = _CRAFT.format(target_minutes=int(round(minutes)), target_words=f"{target_words:,}",
+                          pct=f"{100 * target_words / max(words, 1):.0f}",
+                          dossier_words=f"{words:,}", frame_rule=frame_rule)
+    parts = [_STAGE2_HEADER[mode], build_dossier_block(segment_meta, content), "---",
+             argument_block, "---", craft, _SPOKEN_RULES_DOC, _TITLE_META, _OUTPUT[mode]]
+    return "\n\n".join(parts) + "\n"
 
 
 MATH_SCRIPT_GENERATION_PROMPT = """You are writing a narration script for an educational math video.
@@ -563,13 +935,22 @@ def load_style_guide() -> str:
     return STYLE_KEY_POINTS
 
 
-def compute_duration_and_frame_hints(duration_estimate: str, content: str = "") -> tuple:
+def compute_duration_and_frame_hints(duration_estimate: str, content: str = "", humanities_mode: str = "") -> tuple:
     """Compute duration/frame-count hints from the segment's duration estimate
     (e.g. "15 minutes", "6-8 minutes"), falling back to the source content's
     word count at narration pace.
 
     Returns (duration_hint, frame_count_hint) as strings for prompt injection.
+
+    ``humanities_mode`` (folio) ignores the segment's estimate: the narration is a
+    ~75% SELECTION from the dossier, so minutes = clamp(dossier_words × 0.75 / 150,
+    15, 25) (see humanities_targets). Sizing to the source length forced a 1:1
+    rewrite of the lecture.
     """
+    if humanities_mode:
+        minutes, target_words = humanities_targets(content, humanities_mode)
+        return (f"approximately {int(round(minutes))} minutes (~{target_words:,} words)",
+                humanities_frame_count_hint(humanities_mode, minutes, target_words))
     match = re.search(r'(\d+)(?:\s*-\s*(\d+))?\s*minutes?', duration_estimate or "", re.IGNORECASE)
     if match:
         low = int(match.group(1))
@@ -598,7 +979,7 @@ def main():
     sys.exit(
         "The script step is authored by a Claude Code subagent.\n"
         "Render its prompt: venv/bin/python scripts/render_step_prompt.py script "
-        "--video-dir pipeline/<L>/Video-N --mode <math|technical>\n"
+        "--video-dir pipeline/<L>/Video-N --mode <math|technical|folio>\n"
         "then save the subagent's JSON to script.json and regenerate script.md "
         "(script_parser.save_script) — see .claude/skills/run-pipeline/SKILL.md."
     )

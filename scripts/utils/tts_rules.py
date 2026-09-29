@@ -386,3 +386,25 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
    - These rules apply ONLY to the spoken `narration` field. The `visual` field's
      on-screen equations, labels, and axis numbers keep normal mathematical
      notation — the slide shows `f'(x) = 12x^3 - 4x`, the narrator says it in words."""
+
+
+# Injected into the folio (humanities) script prompt. A series that lives inside ONE
+# era does not need the era spoken on every date — the repetition wears the listener down.
+ERA_MARKER_RULES = """   - **ERA MARKERS — spend "B C" / "A D" only where it earns its place.** When the
+     whole video sits inside one era (a series on ancient Greece is entirely B C), the
+     audience already knows it; hanging "B C" off every date is tiring and drags the
+     line. Default to the BARE year — "in four hundred eighty, the Persians came" —
+     and say the era only where a listener could genuinely be lost:
+       - the FIRST date of the video, which sets the era for everything after it;
+       - any jump OUT of that era — a flash-forward to Rome or the modern world, a
+         "centuries later" aside, a comparison across periods;
+       - dates near the turn of the era, roughly the last century B C through the
+         first century A D, where the bare number is ambiguous;
+       - two dates from different eras standing close together in one passage.
+     Calibration: one or two era markers in a twenty-minute single-era video, not one
+     per date. When you DO say it, spell it as the letters "B C" / "A D" ("four
+     hundred eighty B C", "A D fourteen fifty-three").
+   - **NEVER BCE / CE** ("before the common era" / "common era") anywhere, spoken or
+     on screen — convert the source if it writes them that way. On-screen date labels
+     still carry the written era ("480 BC") even when the spoken line says the bare
+     year; the screen is where the era costs the listener nothing."""

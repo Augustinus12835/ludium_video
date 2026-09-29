@@ -16,8 +16,13 @@ Usage:
 
 Steps:
     clean                 --transcript FILE [--chunk-index N]
-    segment               --content FILE
-    script                --video-dir DIR --mode math|technical
+    segment               --content FILE [--folio [--target N]]
+    argument              --video-dir DIR [--mode folio]
+                          (humanities Stage 1: the ARGUMENT MAP → Video-N/argument.json —
+                          thesis, 3–6 movements, evidence by dossier paragraph ID, cut list.
+                          Reviewed against the dossier (round 0) BEFORE the script step)
+    script                --video-dir DIR --mode math|technical|folio
+                          (folio injects the approved argument.json automatically)
     verify_math           --video-dir DIR --frame N [--prior-context FILE] [--sympy-error TEXT]
     color_scheme          --pipeline-dir DIR (LECTURE-level semantic colour scheme, ONCE in
                           Phase A after segment and BEFORE scripting; result → color_scheme.json.
@@ -53,8 +58,24 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # Prompt constants — imported directly so the renderer cannot drift from
 # what the pipeline scripts expect.
 from scripts.clean_transcript import CLEANING_PROMPT as CLEAN_PIPELINE_PROMPT
-from scripts.segment_concepts import SEGMENTATION_PROMPT
+from scripts.segment_concepts import (
+    SEGMENTATION_PROMPT,
+    build_folio_segment_prompt,
+    target_video_count,
+)
 from scripts.generate_scripts import (
+    ARGUMENT_FILENAME,
+    ARGUMENT_MISSING_BLOCK,
+    ARGUMENT_SYSTEM,
+    DOCUMENTARY_SCRIPT_SYSTEM,
+    HUMANITIES_SCRIPT_MODES,
+    build_argument_prompt,
+    build_humanities_script_prompt,
+    dossier_paragraph_map,
+    format_argument_block,
+    humanities_targets,
+    load_argument_map,
+    validate_argument_map,
     MATH_SCRIPT_GENERATION_PROMPT,
     TECHNICAL_SCRIPT_GENERATION_PROMPT,
     PLANNING_BLOCK,
@@ -93,7 +114,10 @@ SEGMENT_SYSTEM = (
     "Output valid JSON only. Ensure all JSON strings are properly escaped."
 )
 
+# Folio (humanities) uses the documentary-writer system prompt; its user prompt is
+# built by generate_scripts.build_humanities_script_prompt.
 SCRIPT_SYSTEMS = {
+    "folio": DOCUMENTARY_SCRIPT_SYSTEM,
     "math": (
         "You are an expert educational script writer for math videos. "
         "Create clear, precise narration that follows the teaching flow. "
@@ -669,7 +693,16 @@ def step_clean(args: argparse.Namespace) -> None:
 
 def step_segment(args: argparse.Namespace) -> None:
     content = read_text(Path(args.content))
-    user = SEGMENTATION_PROMPT.format(content=content)
+    if args.folio:
+        target = args.target or target_video_count(content)
+        if target <= 1:
+            raise SystemExit(
+                f"Folio mode: {len(content.split())} cleaned words → 1 video. Do NOT segment — "
+                "scaffold a single Video-1: `python scripts/segment_concepts.py <pipeline_dir> "
+                "--single-video --folio`.")
+        user = build_folio_segment_prompt(content, forced_target=args.target or 0)
+    else:
+        user = SEGMENTATION_PROMPT.format(content=content)
     notes = (
         "Output is a single JSON object with start_anchor per video (NOT full content). "
         "Save the subagent's raw response to a file, then materialize deterministically: "
@@ -694,23 +727,36 @@ def step_script(args: argparse.Namespace) -> None:
         raise SystemExit(f"No content found for {video_dir}")
 
     mode = args.mode
-    source_block = build_source_block(segment_meta, content)
-    style_guide = load_style_guide() or ""
-    duration_hint, frame_count_hint = compute_duration_and_frame_hints(
-        segment_meta.get("duration_estimate", ""), content)
-
-    if mode == "math":
-        template = MATH_SCRIPT_GENERATION_PROMPT
+    humanities = mode in HUMANITIES_SCRIPT_MODES
+    arg_map, arg_err, arg_problems = None, "", []
+    if humanities:
+        # Folio: content.txt is a research DOSSIER with [P1]…[Pn] IDs, and the
+        # narration is written to the reviewed argument map (Stage 1, the
+        # `argument` step) at ~75% of the dossier's length.
+        arg_map, arg_err = load_argument_map(video_dir)
+        if arg_map is not None:
+            arg_problems = validate_argument_map(arg_map, content, mode)
+        user = build_humanities_script_prompt(
+            mode, segment_meta, content,
+            format_argument_block(arg_map) if arg_map is not None else ARGUMENT_MISSING_BLOCK)
     else:
-        template = TECHNICAL_SCRIPT_GENERATION_PROMPT
+        source_block = build_source_block(segment_meta, content)
+        style_guide = load_style_guide() or ""
+        duration_hint, frame_count_hint = compute_duration_and_frame_hints(
+            segment_meta.get("duration_estimate", ""), content)
 
-    user = template.format(
-        source_block=source_block,
-        style_guide=style_guide,
-        planning_block=PLANNING_BLOCK,
-        duration_hint=duration_hint,
-        frame_count_hint=frame_count_hint,
-    )
+        if mode == "math":
+            template = MATH_SCRIPT_GENERATION_PROMPT
+        else:
+            template = TECHNICAL_SCRIPT_GENERATION_PROMPT
+
+        user = template.format(
+            source_block=source_block,
+            style_guide=style_guide,
+            planning_block=PLANNING_BLOCK,
+            duration_hint=duration_hint,
+            frame_count_hint=frame_count_hint,
+        )
     # Reference notes, when staged (see load_reference_notes above).
     ref = load_reference_notes(pipeline_dir)
     if ref:
@@ -743,7 +789,58 @@ def step_script(args: argparse.Namespace) -> None:
     if scheme:
         notes += (f" color_scheme={pipeline_dir / COLOR_SCHEME_FILENAME} injected as BACKGROUND "
                   f"({len(scheme)} quantities) — write `visual` in quantities, not colour words.")
+    if humanities:
+        minutes, target_words = humanities_targets(content, mode)
+        n_paras = len(dossier_paragraph_map(content))
+        notes += (f" DOSSIER: {len(content.split()):,} words in {n_paras} paragraphs [P1]…[P{n_paras}]; "
+                  f"target ~{target_words:,} words (~{minutes:.0f} min, selection ≈75%).")
+        if arg_err:
+            notes += (f" ARGUMENT MAP UNREADABLE: {arg_err} — fix it and re-render; the prompt "
+                      "below fell back to 'no approved map'.")
+        elif arg_map is None:
+            notes += (f" ARGUMENT MAP MISSING: no {video_dir / ARGUMENT_FILENAME}. Run Stage 1 first — "
+                      f"`render_step_prompt.py argument --video-dir {video_dir} --mode {mode}` → "
+                      f"save {ARGUMENT_FILENAME} → review round 0 against the dossier → then re-render "
+                      "this step. (The prompt below is still usable: it tells the writer to build "
+                      "the map itself first.)")
+        else:
+            notes += (f" argument_map={video_dir / ARGUMENT_FILENAME} injected "
+                      f"({len(arg_map.get('movements') or [])} movements).")
+            if arg_problems:
+                notes += " ARGUMENT MAP CHECKS: " + "; ".join(arg_problems) + "."
+        notes += (" Frames carry `movement` (0 = cold open) and `sources` (P-ids / \"common\"); "
+                  "top-level `thesis`. Then gate: `venv/bin/python scripts/audit_script.py "
+                  f"{video_dir}` (dossier-verbatim BLOCK, overlap/ratio/unsourced-figure/filler/"
+                  "cadence/movement-shape CHECKs).")
     emit(system, user, notes, pretty=args.pretty)
+
+
+def step_argument(args: argparse.Namespace) -> None:
+    """Humanities Stage 1: the argument map (thesis, movements, evidence by P-id,
+    cut list) that the narration is later written to. Output → Video-N/argument.json."""
+    video_dir = Path(args.video_dir)
+    segments = load_segments(video_dir.parent)
+    segment_meta, content = load_video_source(video_dir, segments)
+    if not content:
+        raise SystemExit(f"No content found for {video_dir}")
+    mode = args.mode
+    user = build_argument_prompt(segment_meta, content, mode)
+    minutes, target_words = humanities_targets(content, mode)
+    out = video_dir / ARGUMENT_FILENAME
+    notes = (
+        f"mode={mode}. Humanities Stage 1 — the ARGUMENT MAP, no narration. Response is a bare "
+        f"JSON object; save verbatim to {out}. Dossier {len(content.split()):,} words → target "
+        f"~{target_words:,} words (~{minutes:.0f} min). Mechanical check: "
+        f"`venv/bin/python scripts/audit_script.py {video_dir} --argument` (movement count, "
+        "unknown / unplaced paragraph IDs, keep_verbatim really verbatim, budgets). Then REVIEW "
+        "ROUND 0: a clean-context reviewer with the dossier checks the map (thesis is a claim, "
+        "movements answer the question in a necessary order, nothing substantive cut, every "
+        "evidence P-id says what it is cited for, debates are real) — rubric in "
+        ".claude/skills/run-pipeline/references/phase-b-folio.md. Once approved, render "
+        f"`render_step_prompt.py script --video-dir {video_dir} --mode {mode}`; it injects "
+        f"{ARGUMENT_FILENAME} automatically."
+    )
+    emit(ARGUMENT_SYSTEM, user, notes, pretty=args.pretty)
 
 
 def step_verify_math(args: argparse.Namespace) -> None:
@@ -1144,12 +1241,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("segment", help="segment_concepts.py prompt")
     sp.add_argument("--content", required=True, help="Path to content_cleaned.txt")
+    sp.add_argument("--folio", action="store_true",
+                    help="Folio (humanities): a few long themed ~20-min videos (count from word count)")
+    sp.add_argument("--target", type=int, default=0,
+                    help="Force the folio video count (else auto from word count)")
     add_common(sp)
     sp.set_defaults(func=step_segment)
 
+    sp = sub.add_parser("argument", help="humanities Stage 1: argument-map prompt for one video "
+                        "(→ Video-N/argument.json, reviewed before the script step)")
+    sp.add_argument("--video-dir", required=True)
+    sp.add_argument("--mode", choices=list(HUMANITIES_SCRIPT_MODES), default="folio")
+    add_common(sp)
+    sp.set_defaults(func=step_argument)
+
     sp = sub.add_parser("script", help="generate_scripts.py prompt for one video")
     sp.add_argument("--video-dir", required=True)
-    sp.add_argument("--mode", choices=["math", "technical"], required=True)
+    sp.add_argument("--mode", choices=["math", "technical", "folio"], required=True)
     add_common(sp)
     sp.set_defaults(func=step_script)
 

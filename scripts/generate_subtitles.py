@@ -177,6 +177,17 @@ def build_words_from_stored_timestamps(video_folder: str) -> Optional[List[Dict]
         # Decoded duration, NOT container metadata — see get_decoded_audio_duration
         offset += get_decoded_audio_duration(mp3_path)
 
+    # Folio compiles may hold the last scene in silence after the final word
+    # (folio.json "tail"); folio.py writes its length here. Without it the silent
+    # tail reads as drift and forces the Scribe fallback.
+    tail_marker = os.path.join(video_folder, 'tail_info.json')
+    if os.path.exists(tail_marker):
+        try:
+            with open(tail_marker, 'r', encoding='utf-8') as f:
+                offset += float(json.load(f).get('lead_silence', 0) or 0)
+        except (json.JSONDecodeError, ValueError, IOError):
+            return None
+
     # Guard: summed frame durations must match the compiled video's AUDIO
     # stream — words ride the audio, and with decoded durations the agreement
     # is sample-accurate modulo one AAC priming window. Do NOT compare against
@@ -560,7 +571,7 @@ def main():
         sys.exit(1)
 
     print("="*60)
-    print("AUREA DICTA SUBTITLE GENERATION")
+    print("LUDIUM VIDEO SUBTITLE GENERATION")
     print("="*60)
     print(f"Lecture: {os.path.basename(lecture_folder)}")
     print(f"Videos: {len(video_folders)}")

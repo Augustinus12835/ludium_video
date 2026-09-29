@@ -11,6 +11,11 @@ scripts/render_step_prompt.py and save the subagent's output, then resume
 (see .claude/skills/run-pipeline/SKILL.md). This orchestrator runs the
 deterministic/non-LLM steps (TTS, Manim renders, compile, subtitles).
 
+Folio (--folio, humanities) runs here only through TTS: its argument map and
+script are subagent steps like the others, and its visual track (scripts/folio.py
++ Remotion) runs from the run-pipeline playbook references/phase-b-folio.md after
+TTS — the animate/compile steps halt with a pointer to it.
+
 Usage:
     python pipeline.py run YOUR_LECTURE
     python pipeline.py video YOUR_LECTURE/Video-3
@@ -591,13 +596,14 @@ def is_math_course(lecture_name: str) -> bool:
     return any(lecture_name.startswith(prefix) for prefix in MATH_COURSE_PREFIXES)
 
 
-def require_pipeline_mode(lecture_name: str, math: bool, technical: bool) -> None:
-    """Exit unless a supported mode is selected (--math/--technical or math prefix)."""
-    if math or technical or is_math_course(lecture_name):
+def require_pipeline_mode(lecture_name: str, math: bool, technical: bool,
+                          folio: bool = False) -> None:
+    """Exit unless a supported mode is selected (--math/--technical/--folio or math prefix)."""
+    if math or technical or folio or is_math_course(lecture_name):
         return
     print(f"{Colors.RED}Error: cannot determine pipeline mode for '{lecture_name}'.{Colors.RESET}")
-    print("This pipeline supports math and technical modes only.")
-    print("Pass --math (pure math) or --technical (math + diagrams + code).")
+    print("Pass --math (pure math), --technical (math + diagrams + code) or --folio")
+    print("(humanities: an illustrated documentary over the narration).")
     print(f"{Colors.DIM}Folders starting with {', '.join(MATH_COURSE_PREFIXES)} "
           f"auto-select math mode.{Colors.RESET}")
     sys.exit(1)
@@ -865,7 +871,7 @@ def subagent_step_error(step: str, render_cmd: str) -> bool:
 
 
 def run_week_step(step: str, lecture_dir: Path, source_video: Path = None,
-                  youtube_video_id: str = None) -> bool:
+                  youtube_video_id: str = None, folio_target: int = 0) -> bool:
     """Run a week-level pipeline step."""
     if step == "transcribe":
         # Check if this is a YouTube source
@@ -891,20 +897,38 @@ def run_week_step(step: str, lecture_dir: Path, source_video: Path = None,
             "clean", f"clean --transcript {lecture_dir}/transcript.json")
 
     elif step == "segment":
+        flags = f" --folio --target {folio_target}" if folio_target >= 2 else ""
         return subagent_step_error(
             "segment",
-            f"segment --content {lecture_dir}/content_cleaned.txt "
+            f"segment --content {lecture_dir}/content_cleaned.txt{flags} "
             f"(then segment_concepts.py {lecture_dir} --apply RESPONSE.json)")
 
     return False
 
 
 def run_video_step(step: str, video_dir: Path, lecture_dir: Path,
-                   technical: bool = False, math: bool = False) -> bool:
+                   technical: bool = False, math: bool = False, folio: bool = False) -> bool:
     """Run a video-level pipeline step."""
     video_num = video_dir.name.replace("Video-", "")
 
-    if step == "script":
+    if step == "script" and folio:
+        # Humanities two-stage script: argument map first, reviewed, then prose.
+        if not (video_dir / "argument.json").exists():
+            return subagent_step_error(
+                "script", f"argument --video-dir {video_dir} --mode folio (save argument.json, "
+                f"review round 0), then script --video-dir {video_dir} --mode folio")
+        return subagent_step_error(
+            "script", f"script --video-dir {video_dir} --mode folio")
+
+    elif step in ("animate", "compile") and folio:
+        print(f"{Colors.YELLOW}Folio mode: the visual track is not a pipeline.py step. After TTS run\n"
+              f"  venv/bin/python scripts/build_narration_timeline.py {video_dir}\n"
+              f"then follow .claude/skills/run-pipeline/references/phase-b-folio.md "
+              f"(folio.py prompt direct → place → audit → assets → scenes → render → compile)."
+              f"{Colors.RESET}")
+        return False
+
+    elif step == "script":
         if math:
             mode = "math"
         elif technical:
@@ -999,7 +1023,7 @@ def find_source_video(lecture_dir: Path) -> Optional[Path]:
 def run_full_pipeline(lecture_id: str, review_mode: bool = True,
                       from_step: str = None, only_video: int = None,
                       technical: bool = False, math: bool = False,
-                      to_step: str = None, folder: str = None):
+                      to_step: str = None, folder: str = None, folio: bool = False):
     """
     Run the full pipeline for a lecture.
 
@@ -1046,8 +1070,8 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
         lecture_id = lecture_id[len(prefix):]
     lecture_dir = PIPELINE_ROOT / lecture_id
 
-    # A mode is required: --math, --technical, or a math course folder prefix
-    require_pipeline_mode(lecture_id, math, technical)
+    # A mode is required: --math, --technical, --folio, or a math course folder prefix
+    require_pipeline_mode(lecture_id, math, technical, folio)
 
     # Ensure pipeline directory exists
     lecture_dir.mkdir(parents=True, exist_ok=True)
@@ -1064,7 +1088,7 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
                 }, f, indent=2)
 
     print_header(
-        "AUREA DICTA - Video Production Pipeline",
+        "LUDIUM VIDEO - Video Production Pipeline",
         f"Lecture: {lecture_id}" + (f" (YouTube: {youtube_video_id})" if youtube_video_id else "")
     )
 
@@ -1098,6 +1122,18 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
         else:
             week_start_idx = len(WEEK_STEPS)  # Skip week steps
 
+    # Folio: a few LONG self-contained ~20-min videos, sized by how much cleaned content
+    # remains (~4,000 words per video: the script narrates ~75% of its dossier at
+    # 150 w/min — segment_concepts.DOSSIER_WORDS_PER_MINUTE). Content for one video
+    # skips segmentation and becomes a single Video-1.
+    folio_target = 0
+    if folio:
+        cc = lecture_dir / "content_cleaned.txt"
+        if cc.exists():
+            sys.path.insert(0, str(SCRIPTS_DIR.parent))
+            from scripts.segment_concepts import target_video_count
+            folio_target = target_video_count(cc.read_text(encoding="utf-8"))
+
     # Run week-level steps
     for i in range(week_start_idx, len(WEEK_STEPS)):
         step = WEEK_STEPS[i]
@@ -1105,6 +1141,19 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
         # --to: stop after the named step (inclusive). Honor it for week steps.
         if to_step and to_step in WEEK_STEPS and i > WEEK_STEPS.index(to_step):
             break
+
+        if step == "segment" and folio and folio_target == 1:
+            week_state = detect_week_state(lecture_dir)
+            if week_state.segment_status == StepStatus.COMPLETE:
+                print(f"  {Colors.DIM}Skipping segment (already complete){Colors.RESET}")
+                continue
+            print_step_header(i + 1, len(WEEK_STEPS), step,
+                              "Create single video (folio — no segmentation)")
+            sys.path.insert(0, str(SCRIPTS_DIR.parent))
+            from scripts.segment_concepts import scaffold_single_video
+            scaffold_single_video(lecture_dir, folio=True)
+            print(f"\n  {Colors.GREEN}✓ segment completed (single video){Colors.RESET}")
+            continue
 
         # Re-check state (may have changed)
         week_state = detect_week_state(lecture_dir)
@@ -1117,7 +1166,8 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
         print_step_header(i + 1, len(WEEK_STEPS), step,
                          f"{'Transcribe lecture' if step == 'transcribe' else 'Clean transcript' if step == 'clean' else 'Segment into videos'}")
 
-        success = run_week_step(step, lecture_dir, youtube_video_id=youtube_video_id)
+        success = run_week_step(step, lecture_dir, youtube_video_id=youtube_video_id,
+                                folio_target=folio_target)
 
         if not success:
             print(f"\n{Colors.RED}  ✗ {step} failed{Colors.RESET}")
@@ -1228,7 +1278,8 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
                  "subtitle": "Generate subtitles"}[step]
             )
 
-            success = run_video_step(step, video_dir, lecture_dir, technical=technical, math=math)
+            success = run_video_step(step, video_dir, lecture_dir, technical=technical, math=math,
+                                     folio=folio)
 
             if not success:
                 print(f"\n{Colors.RED}  ✗ {step} failed{Colors.RESET}")
@@ -1269,7 +1320,7 @@ def run_full_pipeline(lecture_id: str, review_mode: bool = True,
 
 def run_single_video(video_path: str, review_mode: bool = True, from_step: str = None,
                      technical: bool = False, math: bool = False,
-                     to_step: str = None):
+                     to_step: str = None, folio: bool = False):
     """
     Run pipeline for a single video (skips week-level steps).
     Assumes content.txt already exists.
@@ -1290,13 +1341,13 @@ def run_single_video(video_path: str, review_mode: bool = True, from_step: str =
 
     lecture_dir = video_dir.parent
 
-    # A mode is required: --math, --technical, or a math course folder prefix
-    require_pipeline_mode(lecture_dir.name, math, technical)
+    # A mode is required: --math, --technical, --folio, or a math course folder prefix
+    require_pipeline_mode(lecture_dir.name, math, technical, folio)
 
     video_state = detect_video_state(video_dir, math=math, technical=technical)
 
     print_header(
-        f"AUREA DICTA - Single Video Pipeline",
+        f"LUDIUM VIDEO - Single Video Pipeline",
         f"Video: {video_dir}"
     )
 
@@ -1364,7 +1415,8 @@ def run_single_video(video_path: str, review_mode: bool = True, from_step: str =
              "subtitle": "Generate subtitles"}[step]
         )
 
-        success = run_video_step(step, video_dir, lecture_dir, technical=technical, math=math)
+        success = run_video_step(step, video_dir, lecture_dir, technical=technical, math=math,
+                                 folio=folio)
 
         if not success:
             print(f"\n{Colors.RED}  ✗ {step} failed{Colors.RESET}")
@@ -1473,7 +1525,7 @@ The pipeline automatically detects state from files and resumes
 from where it left off. To force a step to rerun, delete its
 output files and run the pipeline again.
 
-LLM-authored steps (clean, segment, script, verify_math) are
+LLM-authored steps (clean, segment, argument/script, verify_math) are
 written by Claude Code subagents via
 scripts/render_step_prompt.py — this orchestrator hard-fails on
 them with the exact command to run (see the /run-pipeline skill).
@@ -1504,6 +1556,9 @@ Review Checkpoints:
                             help="Force technical mode (all-Manim pipeline with conceptual visuals)")
     run_parser.add_argument("--math", action="store_true",
                             help="Force math mode (all-Manim pipeline)")
+    run_parser.add_argument("--folio", action="store_true",
+                            help="Folio mode for humanities: narration-first documentary with a "
+                                 "Remotion 'book of plates' visual track (phase-b-folio.md)")
 
     # video command
     video_parser = subparsers.add_parser("video", help="Run pipeline for single video")
@@ -1517,6 +1572,8 @@ Review Checkpoints:
                               help="Force technical mode (all-Manim pipeline with conceptual visuals)")
     video_parser.add_argument("--math", action="store_true",
                               help="Force math mode (all-Manim pipeline)")
+    video_parser.add_argument("--folio", action="store_true",
+                              help="Folio mode for humanities (phase-b-folio.md)")
 
     # status command
     status_parser = subparsers.add_parser("status", help="Show pipeline status")
@@ -1547,6 +1604,7 @@ Review Checkpoints:
             math=args.math,
             to_step=to_step,
             folder=getattr(args, 'folder', None),
+            folio=args.folio,
         )
 
     elif args.command == "video":
@@ -1557,6 +1615,7 @@ Review Checkpoints:
             technical=args.technical,
             math=args.math,
             to_step=to_step,
+            folio=args.folio,
         )
 
     elif args.command == "status":

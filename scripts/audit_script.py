@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mechanical script-level audit for a Video-N/script.json (math / technical).
+Mechanical script-level audit for a Video-N/script.json (math / technical / folio).
 
 WHY THIS EXISTS. The Phase-B script review used to be one subagent per video that
 re-authored the same probes every time: a cue-uniqueness checker, a final-cue margin
@@ -44,6 +44,31 @@ every such script and, because that path returned early, never ran the TTS check
 all. A script in which NO frame declares a `frame_class` is now audited as narration-only: the
 reference checks are skipped and the spoken-text TTS checks still run. A math script still
 BLOCKs on a frame with no cues.
+
+HUMANITIES DOSSIER CHECKS. Folio (humanities) narration is written from Video-N/content.txt
+treated as a research DOSSIER, to a reviewed argument map (argument.json), at ~75% of the
+dossier's length. A script written straight from its source tracks the lecture instead (one
+early episode: 20% of 10-grams verbatim, an identical run of 89 words). These checks compare
+the narration with the dossier and gate that shape:
+
+  dossier-verbatim   BLOCK  an identical run of >= 10 words outside quotation marks (numbers
+                            normalised through subtitle_compact, so "four hundred fifty-eight"
+                            matches "458"; a run that is mostly names/numbers is exempt)
+  dossier-overlap    CHECK  > 8% of the narration's 6-grams also occur in the dossier
+  dossier-ratio      CHECK  narration words / dossier words > 0.80 (raised only when the
+                            15-minute floor itself demands more)
+  unsourced-figure   CHECK  a number or capitalised name absent from the dossier, in a frame
+                            whose `sources` does not carry "common"
+  sources            CHECK  a frame with no `sources`, or a P-id the dossier does not have
+  lecture-filler     CHECK  "So,"/"Now," openers, "as we'll see", "of course", "let us",
+                            "in this video", a question mark outside quotes, …
+  sentence-cadence   CHECK  mean sentence > 15 words, or > 12% of sentences over 22
+  movement-shape     CHECK  < 3 or > 6 movements, a movement < 90 s or > 6 min, a missing
+                            or decreasing `movement`, a cold open over ~60 s
+
+Mode: `--mode auto` (default) treats a narration-only script as folio (humanities); pass
+`--mode` to force it. `--argument` checks
+Video-N/argument.json alone (the mechanical half of review round 0) — no script needed.
 """
 import argparse
 import json
@@ -87,6 +112,7 @@ QUOTED_RE = re.compile(r'"([^"\n]+)"')
 # CHECK = a real finding the reviewer must judge (it may be correct as authored).
 # Everything else is context. Defaults to CHECK.
 SEVERITY = {
+    "dossier-verbatim": "BLOCK",
     "cue-not-found": "BLOCK", "cue-ambiguous": "BLOCK", "cue-substring": "BLOCK",
     "empty-cue": "BLOCK", "no-cues": "BLOCK", "margin-zero": "BLOCK",
     "meta-frame-count": "BLOCK", "meta-gapless": "BLOCK", "meta-word-count": "BLOCK",
@@ -252,6 +278,264 @@ def _audit_tts(f, num, narration):
         f.append((num, "tts-digits", f"{len(digits)} Arabic numeral(s) in spoken text"))
 
 
+# ---------------------------------------------------------------------------
+# Humanities: narration vs dossier (see the module docstring)
+# ---------------------------------------------------------------------------
+HUMANITIES_MODES = ("folio",)
+VERBATIM_RUN = 10            # BLOCK at an identical run this long (words) …
+VERBATIM_ORDINARY = 8        # … of which at least this many are ordinary words, so a
+                             # run that is mostly names, dates and numbers never BLOCKs
+OVERLAP_N, OVERLAP_MAX = 6, 0.08
+RATIO_MAX = 0.80
+CADENCE_MEAN, CADENCE_LONG, CADENCE_LONG_SHARE = 15.0, 22, 0.12
+MOVE_MIN_S, MOVE_MAX_S, COLD_OPEN_MAX_S = 90.0, 360.0, 60.0
+QUOTE_SPAN_RE = re.compile(r'"[^"]*"|“[^”]*”')
+FILLER_PATS = [
+    (r"^(?:So|Now),", "sentence-initial So,/Now,"),
+    (r"\bas we(?:['’]ll| will| shall) see\b", "as we'll see"),
+    (r"\bas we(?: have)? (?:saw|seen)\b", "as we saw"),
+    (r"\bit(?: is|['’]s) worth noting\b", "it is worth noting"),
+    (r"\bof course\b", "of course"),
+    (r"\blet(?: us|['’]s)\b", "let us"),
+    (r"\bremember that\b", "remember that"),
+    (r"\bin this video\b", "in this video"),
+]
+# Capitalised words that are not names: pronoun, era letters, sentence furniture.
+_NAME_STOP = {"I", "B", "C", "A", "D", "BC", "AD", "Mr", "Mrs", "OK"}
+
+
+def _mask_quotes(text: str) -> str:
+    """Replace each quoted span with a unique non-matching token."""
+    n = [0]
+
+    def sub(_m):
+        n[0] += 1
+        return f" qqmask{n[0]}qq "
+    return QUOTE_SPAN_RE.sub(sub, text)
+
+
+def _canon_tokens(text: str):
+    """[(token, is_name_or_number)] after spoken numbers are compacted to digits.
+    Both the narration and the dossier go through this, so 'four hundred fifty-eight'
+    and '458' meet as '458'."""
+    try:
+        from scripts.utils.subtitle_compact import compact_words
+        words = [w["word"] for w in compact_words(
+            [{"word": w, "start": 0.0, "end": 0.0} for w in text.split()])]
+    except Exception:                                          # noqa: BLE001
+        words = text.split()
+    out, prev = [], ""
+    for w in words:
+        initial = not prev or prev.rstrip('"”’\')').endswith((".", "!", "?", ":"))
+        flag = bool(w) and ((w[0].isupper() and not initial) or w[0].isdigit())
+        for piece in norm(w).split():
+            out.append((piece, flag))
+        prev = w
+    return out
+
+
+def _grams(tokens, n):
+    return [tuple(t for t, _ in tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+
+
+def _sentences(text: str):
+    return [x for x in re.split(r'(?<=[.!?])["”]?\s+', text.strip()) if x.strip()]
+
+
+def load_dossier(video_dir: Path) -> str:
+    p = video_dir / "content.txt"
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def humanities_checks(frames, dossier: str, mode: str = "folio"):
+    """(findings, stats) for the narration-vs-dossier and shape checks."""
+    from scripts.generate_scripts import dossier_paragraph_map, humanities_targets
+    f, st = [], {}
+    paras = dossier_paragraph_map(dossier)
+    if not dossier.strip():
+        return [(None, "no-dossier", "Video-N/content.txt missing — dossier checks skipped")], st
+
+    # dossier n-gram indexes, with the paragraph each 10-gram first occurs in
+    run_index, six = {}, set()
+    for pid, text in paras.items():
+        toks = _canon_tokens(text)
+        for g in _grams(toks, VERBATIM_RUN):
+            run_index.setdefault(g, pid)
+        six.update(_grams(toks, OVERLAP_N))
+
+    all_six, total_words = [], 0
+    for idx, fr in enumerate(frames):
+        num = fr.get("number", idx)
+        narration = fr.get("narration") or ""
+        total_words += len(narration.split())
+        toks = _canon_tokens(_mask_quotes(narration))
+        all_six += _grams(toks, OVERLAP_N)
+        hits = [g in run_index for g in _grams(toks, VERBATIM_RUN)]
+        i = 0
+        while i < len(hits):
+            if not hits[i]:
+                i += 1
+                continue
+            j = i
+            while j + 1 < len(hits) and hits[j + 1]:
+                j += 1
+            run = toks[i:j + VERBATIM_RUN]
+            ordinary = sum(1 for _, fl in run if not fl)
+            if ordinary >= VERBATIM_ORDINARY:                # name / date lists are exempt
+                pid = run_index[tuple(t for t, _ in toks[i:i + VERBATIM_RUN])]
+                text = " ".join(t for t, _ in run)
+                f.append((num, "dossier-verbatim",
+                          f"{len(run)}-word run identical to {pid}: \"{text[:90]}"
+                          f"{'…' if len(text) > 90 else ''}\" — rewrite, or quote it (keep_verbatim)"))
+            i = j + 1
+
+    ov = (sum(1 for g in all_six if g in six) / len(all_six)) if all_six else 0.0
+    st["dossier_overlap"] = round(ov, 3)
+    if ov > OVERLAP_MAX:
+        f.append((None, "dossier-overlap",
+                  f"{100 * ov:.1f}% of the narration's {OVERLAP_N}-grams occur in the dossier "
+                  f"(limit {100 * OVERLAP_MAX:.0f}%) — the script is paraphrasing, not writing"))
+
+    dossier_words = len(dossier.split())
+    ratio = total_words / max(dossier_words, 1)
+    _, target = humanities_targets(dossier, mode)
+    limit = max(RATIO_MAX, target / max(dossier_words, 1) + 0.05)
+    st["dossier_ratio"] = round(ratio, 2)
+    st["target_words"] = target
+    if ratio > limit:
+        f.append((None, "dossier-ratio",
+                  f"narration is {ratio:.2f}x the dossier ({total_words:,} / {dossier_words:,} "
+                  f"words; limit {limit:.2f}, target ~{target:,}) — select, don't transcribe"))
+
+    # provenance: sources present and real; unsourced numbers and names
+    known = set(paras)
+    dnums = {t for t, _ in _canon_tokens(dossier) if any(c.isdigit() for c in t)}
+    dwords = {w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]+", dossier)}
+    missing_src, common_frames = [], []
+    for idx, fr in enumerate(frames):
+        num = fr.get("number", idx)
+        src = fr.get("sources")
+        if not src:
+            missing_src.append(num)
+            src = []
+        src = [src] if isinstance(src, str) else src
+        bad = [s for s in src if s != "common" and s not in known]
+        if bad:
+            f.append((num, "sources", f"unknown paragraph ID(s) {bad} (dossier has P1…P{len(paras)})"))
+        if "common" in src:
+            common_frames.append(num)
+            continue
+        narration = fr.get("narration") or ""
+        odd = []
+        for t, _ in _canon_tokens(narration):
+            if any(c.isdigit() for c in t) and t not in dnums and t not in odd:
+                odd.append(t)
+        # an opening quotation mark starts a sentence too ('asks, "Who wishes…')
+        for sent in _sentences(re.sub(r'\s["“]', ". ", narration)):
+            words = re.findall(r"[A-Za-zÀ-ÿ'’-]+", sent)
+            for w in words[1:]:                               # skip the sentence-initial word
+                for part in w.split("-"):
+                    part = re.sub(r"['’]s?$", "", part)
+                    if (len(part) < 3 or not part[0].isupper() or part in _NAME_STOP
+                            or part in odd):
+                        continue
+                    lo = part.lower()
+                    stem = lo[:max(4, len(lo) - 2)]
+                    if lo in dwords or lo.rstrip("s") in dwords or any(
+                            d.startswith(stem) for d in dwords):
+                        continue
+                    odd.append(part)
+        if odd:
+            f.append((num, "unsourced-figure",
+                      f"not in the dossier: {', '.join(odd[:8])}{' …' if len(odd) > 8 else ''} "
+                      "— verify, or tag the frame's sources \"common\""))
+    if missing_src:
+        f.append((None, "sources", f"{len(missing_src)} frame(s) carry no `sources`: "
+                  f"{missing_src[:15]}{' …' if len(missing_src) > 15 else ''}"))
+    st["common_frames"] = common_frames
+
+    # lecture filler + cadence
+    lengths = []
+    for idx, fr in enumerate(frames):
+        num = fr.get("number", idx)
+        narration = fr.get("narration") or ""
+        masked = _mask_quotes(narration)
+        found = []
+        for sent in _sentences(masked):
+            s = sent.strip().strip('"“”')
+            for pat, label in FILLER_PATS:
+                if re.search(pat, s, re.I if not pat.startswith("^") else 0):
+                    found.append(label)
+            if s.rstrip('"”').endswith("?"):
+                found.append("question")
+        if found:
+            f.append((num, "lecture-filler", ", ".join(sorted(set(found)))))
+        lengths += [len(x.split()) for x in _sentences(narration)]
+    if lengths:
+        mean = sum(lengths) / len(lengths)
+        long_share = sum(1 for n in lengths if n > CADENCE_LONG) / len(lengths)
+        st["sentence_mean"] = round(mean, 1)
+        st["sentence_long_share"] = round(long_share, 3)
+        if mean > CADENCE_MEAN or long_share > CADENCE_LONG_SHARE:
+            f.append((None, "sentence-cadence",
+                      f"mean {mean:.1f} words/sentence (limit {CADENCE_MEAN:.0f}), "
+                      f"{100 * long_share:.0f}% over {CADENCE_LONG} words (limit "
+                      f"{100 * CADENCE_LONG_SHARE:.0f}%)"))
+
+    # movement shape
+    moves = [fr.get("movement") for fr in frames]
+    if all(m is None for m in moves):
+        f.append((None, "movement-shape", "no frame carries `movement` — script predates the "
+                  "argument-map process, or the field was dropped"))
+    else:
+        if any(m is None for m in moves):
+            f.append((None, "movement-shape",
+                      f"frames without `movement`: {[fr.get('number', i) for i, fr in enumerate(frames) if fr.get('movement') is None][:15]}"))
+        seq = [m for m in moves if isinstance(m, int)]
+        if any(b < a for a, b in zip(seq, seq[1:])):
+            f.append((None, "movement-shape", f"`movement` decreases somewhere: {seq}"))
+        dur = {}
+        for fr in frames:
+            m = fr.get("movement")
+            if isinstance(m, int):
+                dur[m] = dur.get(m, 0.0) + len((fr.get("narration") or "").split()) / WPS
+        body = {m: d for m, d in dur.items() if m != 0}
+        st["movements"] = {m: round(d) for m, d in sorted(dur.items())}
+        if not 3 <= len(body) <= 6:
+            f.append((None, "movement-shape", f"{len(body)} movements (need 3–6)"))
+        for m, d in sorted(body.items()):
+            if d < MOVE_MIN_S or d > MOVE_MAX_S:
+                f.append((None, "movement-shape",
+                          f"movement {m} runs {d:.0f}s (90 s – 6 min)"))
+        if dur.get(0, 0) > COLD_OPEN_MAX_S:
+            f.append((None, "movement-shape", f"cold open (movement 0) runs {dur[0]:.0f}s "
+                      f"(~30 s intended, limit {COLD_OPEN_MAX_S:.0f}s)"))
+        if 0 not in dur:
+            f.append((None, "movement-shape", "no cold-open frame (movement 0)"))
+    return f, st
+
+
+def detect_mode(video_dir: Path, script: dict, cli_mode: str = "auto") -> str:
+    """Script mode for gating: cli override, else inferred from the script's shape."""
+    if cli_mode != "auto":
+        return cli_mode
+    frames = script.get("frames", [])
+    if any(fr.get("frame_class") for fr in frames):
+        return "manim"                          # math / technical
+    return "folio"                              # narration-only = humanities
+
+
+def audit_argument(video_dir: Path, mode: str = "folio"):
+    """Mechanical checks on Video-N/argument.json (review round 0). Returns problems."""
+    from scripts.generate_scripts import load_argument_map, validate_argument_map
+    arg, err = load_argument_map(video_dir)
+    if err:
+        return [err]
+    if arg is None:
+        return [f"no {video_dir}/argument.json"]
+    return validate_argument_map(arg, load_dossier(video_dir), "folio")
+
+
 def ngram_overlap(a: str, b: str, n=8):
     """Fraction of a's n-grams also present in b."""
     aw, bw = norm(a).split(), norm(b).split()
@@ -262,7 +546,7 @@ def ngram_overlap(a: str, b: str, n=8):
     return len(A & B) / len(A) if A else 0.0
 
 
-def audit(video_dir: Path, siblings=False):
+def audit(video_dir: Path, siblings=False, mode="auto"):
     sp = video_dir / "script.json"
     if not sp.exists():
         raise SystemExit(f"no script.json in {video_dir}")
@@ -288,6 +572,12 @@ def audit(video_dir: Path, siblings=False):
         findings += f
         stats.append(st)
 
+    mode = detect_mode(video_dir, script, mode)
+    if mode in HUMANITIES_MODES:
+        hf, hst = humanities_checks(frames, load_dossier(video_dir), mode)
+        findings += hf
+        stats.append({"humanities": hst, "mode": mode})
+
     if siblings:
         me = " ".join((fr.get("narration") or "") for fr in frames)
         for sib in sorted(video_dir.parent.glob("Video-*")):
@@ -308,6 +598,10 @@ def main():
     ap.add_argument("--siblings", action="store_true", help="also n-gram against sibling videos")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--self-test", action="store_true", help="prove every check can FAIL")
+    ap.add_argument("--mode", default="auto", choices=["auto", "folio", "math", "technical"],
+                    help="script mode (auto: inferred; folio adds the dossier checks)")
+    ap.add_argument("--argument", action="store_true",
+                    help="check Video-N/argument.json only (humanities review round 0)")
     a = ap.parse_args()
 
     if a.self_test:
@@ -315,9 +609,22 @@ def main():
     if not a.video_dir:
         ap.error("video_dir required (or --self-test)")
 
-    findings, stats, script, cue_schedule = audit(Path(a.video_dir), a.siblings)
+    if a.argument:
+        problems = audit_argument(Path(a.video_dir), a.mode)
+        print(f"argument-map audit — {a.video_dir}")
+        for p in problems:
+            print(f"    CHECK [argument-map] {p}")
+        print("\n  CLEAN — mechanical argument-map checks passed." if not problems else
+              f"\n  {len(problems)} finding(s). Judgement (is the thesis a claim, is anything "
+              "substantive cut, does each P-id say what it is cited for) is the round-0 reviewer's.")
+        return 1 if problems else 0
+
+    findings, stats, script, cue_schedule = audit(Path(a.video_dir), a.siblings, a.mode)
+    hum = next((s for s in stats if "humanities" in s), None)
+    stats = [s for s in stats if "humanities" not in s]
     if a.json:
         print(json.dumps({"narration_only": not cue_schedule,
+                          "humanities": hum,
                           "findings": [{"frame": f, "check": c, "detail": d} for f, c, d in findings],
                           "stats": stats}, indent=2))
         return 1 if findings else 0
@@ -332,9 +639,19 @@ def main():
                   f"{s.get('first_beat', 0):>6}{s.get('max_gap', 0):>8}"
                   f"{s.get('final_margin', 0):>8}{s.get('ref_per_word', 0):>7}")
     else:
-        print("  NARRATION-ONLY script (no frame declares a frame_class). The visual track is")
+        print("  NARRATION-ONLY script (no frame declares a frame_class: folio). The visual track is")
         print("  authored separately, so the cue, scope, colour and Tex checks do not apply.")
         print("  Metadata, sibling-overlap and spoken-text TTS checks ran.")
+    if hum:
+        h = hum["humanities"]
+        print(f"\n  HUMANITIES ({hum['mode']}) vs dossier: ratio {h.get('dossier_ratio', '?')}x "
+              f"(target ~{h.get('target_words', '?')} words), {OVERLAP_N}-gram overlap "
+              f"{100 * h.get('dossier_overlap', 0):.1f}%, sentences mean {h.get('sentence_mean', '?')} "
+              f"words / {100 * h.get('sentence_long_share', 0):.0f}% over {CADENCE_LONG}")
+        if h.get("movements"):
+            print(f"  movements (s): {h['movements']}")
+        if h.get("common_frames"):
+            print(f"  frames tagged \"common\" (reviewer verifies each): {h['common_frames']}")
     if findings:
         order = {"BLOCK": 0, "CHECK": 1}
         ranked = sorted(findings, key=lambda x: order.get(SEVERITY.get(x[1], "CHECK"), 1))
@@ -427,8 +744,116 @@ def self_test():
     neg2 = not f2
     print(f"  {'PASS' if neg2 else 'FAIL'}  {'narration-only control':<22} expect no findings  got {[c for _, c, _ in f2] or '[]'}")
     neg = neg and neg2
+    hok = _humanities_self_test()
+    ok = ok and hok
     print("\n" + ("all detectors fire and the clean control stays silent" if ok and neg else "SELF-TEST FAILED"))
     return 0 if (ok and neg) else 1
+
+
+def _humanities_self_test():
+    """Each dossier check FIRES on a known-bad script and stays QUIET on the clean one."""
+    import copy
+    pad = "\n\n".join(
+        " ".join(f"ledger{i}x{j}" for j in range(95)) + "." for i in range(40))
+    dossier = (
+        "# Test dossier\n\n"
+        "The Athenian assembly met on the Pnyx about forty times a year, and any adult male "
+        "citizen could attend, speak and vote on the business of the day.\n\n"
+        "Pericles introduced pay for jurors around 450 BC, and some 6,000 citizens were "
+        "enrolled each year for the courts, which heard cases from dawn to dusk.\n\n"
+        "Women could not vote, could not speak in the assembly, and could not own significant "
+        "property in their own names under Athenian law.\n\n"
+        "Aeschylus, Sophocles, Euripides, Aristophanes, Phrynichus, Agathon, Ion, Achaeus, "
+        "Thespis and Choerilus all competed at the festival.\n\n" + pad)
+    sents = [
+        "Citizens climb the rocky hill before dawn and wait for the herald.",
+        "The herald opens the meeting and invites any man to speak.",
+        "Pericles argues that jurors deserve a daily wage for their time.",
+        "Poor farmers now sit beside rich landowners in the crowded courts.",
+        "Women run the household but stay outside every public decision.",
+        "The Athenian courts hear quarrels over land, debts and inheritance.",
+        "Each verdict comes from ordinary men voting with bronze tokens.",
+        "The Pnyx holds a great crowd, yet few ever rise to talk.",
+        "Speakers learn to persuade a crowd that can shout them down.",
+        "Theatre audiences bring those same habits of judgment to the plays.",
+    ]
+
+    def para(k, n=7):
+        return " ".join(sents[(k + i) % len(sents)] for i in range(n))
+
+    frames = [{"number": 0, "movement": 0, "sources": ["P1"], "narration": para(0, 6)}]
+    for m in (1, 2, 3):
+        for r in range(3):
+            frames.append({"number": len(frames), "movement": m,
+                           "sources": [f"P{m}", "P2"], "narration": para(m * 3 + r, 9)})
+
+    def run(fr):
+        got, _ = humanities_checks(fr, dossier, "folio")
+        return {c for _, c, _ in got}, got
+
+    def mutate(fn):
+        fr = copy.deepcopy(frames)
+        fn(fr)
+        return fr
+
+    def prepend(i, text):
+        return lambda fr: fr[i].__setitem__("narration", text + " " + fr[i]["narration"])
+
+    bad = [
+        ("verbatim run", prepend(1, "In those years any adult male citizen could attend, "
+                                    "speak and vote on the business of the day."),
+         "dossier-verbatim"),
+        ("verbatim, numbers", prepend(2, "Records show some six thousand citizens were enrolled "
+                                         "each year for the courts, which heard cases from "
+                                         "dawn to dusk."), "dossier-verbatim"),
+        ("overlap", lambda fr: [f.__setitem__("narration", dossier.split("\n\n")[k % 3 + 1])
+                                for k, f in enumerate(fr)], "dossier-overlap"),
+        ("ratio", lambda fr: fr.extend(copy.deepcopy(fr * 5)), "dossier-ratio"),
+        ("unsourced name+number", prepend(3, "Cleisthenes built ten tribes in five hundred "
+                                             "and eight."), "unsourced-figure"),
+        ("missing sources", lambda fr: fr[4].pop("sources"), "sources"),
+        ("unknown P-id", lambda fr: fr[4].__setitem__("sources", ["P999"]), "sources"),
+        ("filler opener", prepend(5, "So, the vote mattered."), "lecture-filler"),
+        ("rhetorical question", prepend(5, "Why did it matter so much?"), "lecture-filler"),
+        ("long sentences", lambda fr: [f.__setitem__("narration", " ".join(
+            [f["narration"].replace(".", " and").rstrip(" and") + "."])) for f in fr],
+         "sentence-cadence"),
+        ("no movement field", lambda fr: [f.pop("movement") for f in fr], "movement-shape"),
+        ("two movements", lambda fr: [f.__setitem__("movement", min(f["movement"], 2))
+                                      for f in fr], "movement-shape"),
+    ]
+    quiet = [
+        ("quoted run", prepend(1, 'The law was plain: "any adult male citizen could attend, '
+                                  'speak and vote on the business of the day."'),
+         "dossier-verbatim"),
+        ("name list", prepend(1, "Competitors included Aeschylus, Sophocles, Euripides, "
+                                 "Aristophanes, Phrynichus, Agathon, Ion, Achaeus, Thespis and "
+                                 "Choerilus."), "dossier-verbatim"),
+        ("common-tagged frame", lambda fr: (prepend(3, "Cleisthenes built ten tribes in five "
+                                                       "hundred and eight.")(fr),
+                                            fr[3]["sources"].append("common")),
+         "unsourced-figure"),
+        ("quoted question", prepend(5, 'The herald asks, "Who wishes to speak?"'),
+         "lecture-filler"),
+    ]
+    print("\nhumanities dossier checks — each bad case must FIRE, each control stay QUIET:")
+    ok = True
+    got0, raw0 = run(frames)
+    good = not got0
+    print(f"  {'PASS' if good else 'FAIL'}  {'clean humanities script':<24} expect no findings  "
+          f"got {sorted(got0) or '[]'}{'' if good else ' ' + str(raw0[:3])}")
+    ok = ok and good
+    for name, fn, want in bad:
+        got, _ = run(mutate(fn))
+        hit = want in got
+        print(f"  {'PASS' if hit else 'FAIL'}  {name:<24} expect '{want}'  got {sorted(got) or '[]'}")
+        ok = ok and hit
+    for name, fn, silent in quiet:
+        got, _ = run(mutate(fn))
+        q = silent not in got
+        print(f"  {'PASS' if q else 'FAIL'}  {name:<24} expect NO '{silent}'  got {sorted(got) or '[]'}")
+        ok = ok and q
+    return ok
 
 
 if __name__ == "__main__":

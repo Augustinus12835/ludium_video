@@ -555,7 +555,7 @@ def compile_video(video_folder: str) -> str:
     start_time = datetime.now()
 
     print("=" * 70)
-    print("AUREA DICTA VIDEO COMPILATION")
+    print("LUDIUM VIDEO COMPILATION")
     print("=" * 70)
     print(f"Video folder: {video_folder}")
     print("Frames/audio sync: Simultaneous (no delay)")

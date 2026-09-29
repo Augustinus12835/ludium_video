@@ -84,3 +84,62 @@ override).
 
 Then segment in `--technical` mode (standard concept segmentation) and run the standard
 Phase B chain.
+
+## Humanities sources (folio mode)
+
+Folio videos are built from material you are free to adapt. Two kinds work well:
+
+- **Open courses** — recorded university lectures published under an open licence (e.g. Open
+  Yale Courses, CC BY-NC-SA). Run the YouTube or recording path above with `--folio`:
+  transcribe → clean (the standard clean prompt) → coverage gate → segment. Record the course,
+  lecturer and licence in `pipeline/<L>/source_info.json` so the attribution travels with the
+  video.
+- **Open textbooks** — books under an open licence (e.g. Open Book Publishers titles, CC BY).
+  Divide the book into ~20-minute **episodes** with a manifest, the same machinery as the
+  multi-chapter units above.
+
+Either way `content_cleaned.txt` is a research **dossier**, not a script: the folio script
+narrates ~75% of it, written from an argument map (references/phase-b-folio.md). Size each
+video at ~4,000 cleaned words (3,000–5,000): `segment_concepts.target_video_count` computes
+the count, and `render_step_prompt.py segment --folio` / `segment_concepts.py <L>
+--single-video --folio` use it (`pipeline.py run <L> --folio` does this automatically).
+
+### Open textbook → episodes (worked example: Plato's *Republic*)
+
+`docs/examples/plato_republic_episodes.json` divides Sean McAleer, *Plato's 'Republic': An
+Introduction* (Open Book Publishers 2020, CC BY 4.0) into 26 episodes of 3.2k–5k words, cut at
+the book's own section seams in the Republic's order.
+
+1. **Convert the book to one Markdown file per section.** Publisher PDFs with a real text
+   layer need no OCR: `scripts/obp_pdf_to_markdown.py` reads the typesetting (headings by
+   font, indented displays such as P1/P2/C argument reconstructions, footnotes split out,
+   running headers dropped, line-end hyphens resolved against the book's own vocabulary):
+   ```bash
+   venv/bin/python scripts/obp_pdf_to_markdown.py inputs/plato_republic_mcaleer/<book>.pdf -o inputs/plato_republic_mcaleer
+   ```
+   → `sec_<CC>_<SS>.md` (one `## heading` + prose each), `sections.json` (heading, Stephanus
+   range, word count per section — the table you plan episodes from) and `notes/ch_CC.md`. The
+   font roles are the OBP house layout; for another publisher, dump a page's spans with
+   PyMuPDF and adjust the font/size rules in `extract()`. Spot-check fidelity (e.g. sample
+   5-word runs of the PDF's body text and confirm each appears in the Markdown). Scanned books
+   without a text layer take the vision-subagent PDF path above instead.
+2. **Plan the episodes** in a manifest: each unit lists its section files
+   (`{"file": "sec_01_02", "sections": "all", "drop_end_matter": false}`), a title, and
+   `"profile": "commentary"`. Keep each at 3,000–5,000 words; cut at genuine seams; leave out
+   book apparatus (chapter previews, reading lists). A top-level `source` block is written to
+   `source_info.json`; a top-level `attribution` heads `content_cleaned.txt`.
+3. **Compose + emit the clean prompt** per episode:
+   ```bash
+   venv/bin/python scripts/clean_book_chapter.py --manifest docs/examples/plato_republic_episodes.json \
+       --book-dir inputs/plato_republic_mcaleer --unit Republic_E01_Two_Questions_And_A_Walk_To_The_Piraeus
+   ```
+   The `commentary` profile is a LIGHT clean: apparatus and cross-chapter references resolved
+   into content, every quotation kept verbatim with its reference, every standard-form
+   argument kept as a `> ` block, the author's interpretive "I" kept as attributed stance
+   ("McAleer argues"). Expect 90–100% of the composed length. Join as in the book flow, run
+   the coverage gate, then `segment_concepts.py pipeline/<unit> --single-video --folio` and
+   the folio Phase B.
+4. **Licences.** CC BY needs attribution in every published description. Quotations the book
+   itself reproduces from a copyrighted translation are not covered by the book's licence —
+   keep them short on screen and in narration, and never supply more of the translation from
+   memory.

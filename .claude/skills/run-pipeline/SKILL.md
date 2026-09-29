@@ -15,7 +15,8 @@ verification, colour scheme/plan, frame codegen. `render_step_prompt.py` renders
 prompt each step needs; the subagent works from that plus what a blind API call lacks
 (codegen gets a render→look→fix loop, math verification runs SymPy itself). `pipeline.py` is
 called only for deterministic slices (`--from X --to Y`: transcribe, tts, animate-render,
-compile, subtitle). The only paid external calls are ElevenLabs (TTS + Scribe). Use your most
+compile, subtitle). The only paid external calls are ElevenLabs (TTS + Scribe) — plus, in folio
+(humanities) runs only, image generation (OpenAI gpt-image, Gemini for maps). Use your most
 capable available model for every subagent, and pass it explicitly rather than relying on
 inheritance.
 
@@ -29,7 +30,7 @@ QA-driven fixes).
 ## Invocation
 
 ```
-/run-pipeline <source-spec> [--math | --technical]
+/run-pipeline <source-spec> [--math | --technical | --folio]
 ```
 
 `<source-spec>` is one of:
@@ -41,6 +42,10 @@ QA-driven fixes).
 - **A PDF book chapter, Markdown/AsciiDoc chapter, or PPTX deck** →
   see [references/sources.md](references/sources.md); these arrive with
   `content_cleaned.txt`, so Phase A starts at segment.
+- **An open-textbook episode named in an episode manifest** (folio; e.g.
+  `docs/examples/plato_republic_episodes.json`) → compose and clean it per
+  [references/sources.md](references/sources.md) "Humanities sources", then Phase A from
+  the coverage gate.
 - **An existing pipeline dir or `Video-N` path** → resume in place (`pipeline.py`
   auto-detects state; single video runs via `pipeline.py video`).
 
@@ -49,15 +54,17 @@ stop only if it's unparseable.
 
 **Mode routing.** `--math` for pure math (auto-detected from folder prefixes like
 `Calculus_`, `Linear_Algebra_`, `Statistics_`, `Probability_`, `Differential_Equations_`);
-`--technical` for math + diagrams + code (finance, CS, engineering, physics). One is
-required — there is no default mode.
+`--technical` for math + diagrams + code (finance, CS, engineering, physics); `--folio` for
+humanities (history, philosophy, literature, religion) — a narration-first documentary with a
+Remotion "book of plates" visual track, sourced from open courses or open textbooks
+(references/sources.md "Humanities sources"). One is required — there is no default mode.
 
 **Voice.** Narration uses `ELEVENLABS_VOICE_ID` from `.env` — pass no `--voice-id`.
 
 ## How it runs
 
 - **Phase A — source-level prep, orchestrator, once:** transcribe → clean → coverage gate →
-  segment → colour scheme.
+  segment → colour scheme (math/technical only).
 - **Phase B1 — scripting, one agent per video, reporting to the orchestrator:** the script;
   the orchestrator runs the review relay in the middle.
 - **Phase B2 — production, one producer per video:** spawned only once B1's artifacts are on
@@ -117,12 +124,17 @@ Skip any step whose output already exists. Book and PPTX sources arrive with
    (d) `wc -w` ratio: lectures usually clean to ~55–70% of source. It is advisory — an
    administrative intro lecture can land far lower and still be complete — but below ~45%, or
    a chunk-sized hole, means a dropped span. Re-clean any missing span.
-4. **segment** — very short content (a single self-contained chapter or question) can skip
-   straight to `segment_concepts.py pipeline/<L> --single-video`. Otherwise:
+4. **segment** — **folio:** a few LONG ~20-minute videos (~4,000 cleaned words each). Check the
+   count with `venv/bin/python -c "from scripts.segment_concepts import target_video_count;
+   print(target_video_count(open('pipeline/<L>/content_cleaned.txt').read()))"`; count 1 →
+   `segment_concepts.py pipeline/<L> --single-video --folio`; count ≥ 2 → render
+   `segment --content … --folio` and apply as below. **Math/technical:** very short content (a
+   single self-contained chapter or question) can skip straight to
+   `segment_concepts.py pipeline/<L> --single-video`. Otherwise:
    `render_step_prompt.py segment --content pipeline/<L>/content_cleaned.txt` → one subagent
    returns anchor-based JSON → save → `segment_concepts.py pipeline/<L> --apply <response>`.
    On "Anchor split failed", re-spawn with the error appended.
-5. **Colour scheme (before any script).** Colour is decided once per lecture so a quantity
+5. **Colour scheme (math/technical, before any script).** Colour is decided once per lecture so a quantity
    can't change colour between videos:
    ```bash
    venv/bin/python scripts/render_step_prompt.py color_scheme --pipeline-dir pipeline/<L>
@@ -139,7 +151,9 @@ Skip any step whose output already exists. Book and PPTX sources arrive with
 ### Phase B (per video) — B1 scripting → review relay → B2 production
 
 The playbook is split into Stage 1 (scripting) and Stage 2 (production):
-[references/phase-b.md](references/phase-b.md).
+[references/phase-b.md](references/phase-b.md) for math/technical;
+[references/phase-b-folio.md](references/phase-b-folio.md) for folio (narration → director →
+assets → scene authors → render → compile).
 
 **Brief by reference.** Each agent's prompt names the video, mode and playbook stage to read,
 carries only the facts specific to this video (audit numbers, fixes already applied, the scope
@@ -150,15 +164,27 @@ it, and a paraphrase drifts from it.
 B1 is a conversation with one scripting agent:
 
 1. Spawn the Stage-1 scripting agent. It writes `script.json`, regenerates `script.md`, and
-   reports back.
+   reports back. **Folio scripts in two stages:**
+   - **1a. Argument map.** The agent renders `render_step_prompt.py argument`, writes
+     `Video-N/argument.json` (thesis, 3–6 movements with claim / evidence by dossier paragraph
+     ID / turn, cut list, best-of-source, ≤3 verbatim quotes) and reports.
+   - **1b. Round-0 review.** Run `audit_script.py pipeline/<L>/Video-N --argument`, then spawn
+     one clean-context reviewer with `argument.json`, `content.txt` and that output (rubric:
+     phase-b-folio.md "Humanities review rubric", round 0). Relay its findings; at most 2
+     passes. Then tell the agent to write the narration — the `script` render injects the
+     approved map (its `notes` say `argument_map=… injected`).
 2. Run `scripts/audit_script.py pipeline/<L>/Video-N --siblings` yourself (seconds; tiered
    BLOCK/CHECK — cue uniqueness, margins, gaps, scope gate, TTS, metadata, sibling overlap).
    Then spawn one clean-context reviewer with that output and tell it not to redo those checks;
-   its effort goes to the maths, fit simulation, source fidelity, pedagogy and prose. Relay the
+   its effort goes to the maths, fit simulation, source fidelity, pedagogy and prose (folio:
+   structure, argument, selection, accuracy of `common` frames, voice — the rounds 1–2
+   rubric). Relay the
    combined issue list to the scripting agent via `SendMessage`; it applies every content fix.
    You may apply purely mechanical fixes (frame numbering, `metadata.frame_count`) yourself.
    At most 2 rounds.
-3. On pass, spawn the Stage-2 producer. Record which agent owns which video.
+3. On pass: math/technical → spawn the Stage-2 producer. Folio → message the scripting agent
+   to run TTS and the word timeline; then run the director, asset, scene-author, render and
+   compile stages from phase-b-folio.md. Record which agent owns which video.
 
 The reviewer is the one deliberate second opinion in the pipeline. Don't add further
 verification agents — every agent here checks its own work.

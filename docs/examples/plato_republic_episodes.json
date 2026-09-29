@@ -1,0 +1,1054 @@
+{
+ "course": "Plato's Republic — a folio (humanities) series from Sean McAleer, Plato's 'Republic': An Introduction (Open Book Publishers, 2020)",
+ "book_dir": "inputs/plato_republic_mcaleer",
+ "mode": "folio",
+ "profile": "commentary",
+ "source": {
+  "url": "https://doi.org/10.11647/OBP.0229",
+  "title": "Plato's 'Republic': An Introduction",
+  "author": "Sean McAleer (University of Wisconsin–Eau Claire)",
+  "publisher": "Open Book Publishers, Cambridge, UK, 2020",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "Based on Plato's 'Republic': An Introduction by Sean McAleer (Cambridge, UK: Open Book Publishers, 2020), https://doi.org/10.11647/OBP.0229, licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Changes were made: the book was divided into episodes and rewritten for narration. Quotations from the Republic follow the translation the book quotes, G.M.A. Grube rev. C.D.C. Reeve (Hackett, 1992). The author and publisher do not endorse this adaptation.",
+  "textbook_url": "https://www.openbookpublishers.com/books/10.11647/obp.0229",
+  "pdf_mirror": "https://archive.org/details/77577544-6a20-414c-b752-caa819978656"
+ },
+ "attribution": "Sean McAleer, Plato's 'Republic': An Introduction (Open Book Publishers, 2020, https://doi.org/10.11647/OBP.0229), License: CC BY 4.0",
+ "notes": "Worked example of an open textbook divided into ~20-minute EPISODES. The book walks the Republic book by book (14 chapters + Introduction + Afterword, ~105k words of prose). scripts/obp_pdf_to_markdown.py turns the publisher's PDF (clean text layer, no OCR) into one file per book section, sec_<CC>_<SS>.md (CC 00 = Introduction, 15 = Afterword; SS 00 = chapter lead-in) + sections.json (heading, Stephanus range, words) + notes/ch_CC.md (footnotes, kept out of the dossier). 26 episodes of 3.2k–5k dossier words (the folio band: the script narrates ~75% at 150 wpm, 15–25 min), cut at the book's own section seams in the Republic's order. Cut: the Introduction's chapter-by-chapter rundown (sec_00_04) and every 'Some Suggestions for Further Reading'. Clean profile 'commentary' is a LIGHT clean into a research dossier. Quotations of the Republic inside the book are the Grube–Reeve translation (Hackett, copyrighted) as quoted there: keep on-screen quotations short and never supply more translation from memory.",
+ "units": [
+  {
+   "unit": "Republic_E01_Two_Questions_And_A_Walk_To_The_Piraeus",
+   "title": "Two Questions and a Walk to the Piraeus",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Introduction + Book I",
+   "stephanus": "1.327a–328c",
+   "book_chapters": [
+    0,
+    1
+   ],
+   "dossier_words": 4444,
+   "sources": [
+    {
+     "file": "sec_00_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_00_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Republic’s Two Main Questions"
+    },
+    {
+     "file": "sec_00_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Structure of the Republic"
+    },
+    {
+     "file": "sec_00_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Arguing about Justice"
+    },
+    {
+     "file": "sec_01_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_01_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Polemarchus Wants You to Wait (1.327a–328c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E02_Is_Justice_Paying_What_You_Owe_Cephalus_And_Polemarchus",
+   "title": "Is Justice Paying What You Owe? Cephalus and Polemarchus",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book I",
+   "stephanus": "1.328c–334b",
+   "book_chapters": [
+    1
+   ],
+   "dossier_words": 4266,
+   "sources": [
+    {
+     "file": "sec_01_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Cephalus: Justice is Paying Your Debts and Telling the Truth (1.328c–331d)"
+    },
+    {
+     "file": "sec_01_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Polemarchus: Justice is Benefiting Friends and Harming Enemies (1.331d–336a)"
+    },
+    {
+     "file": "sec_01_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Is Justice a Craft? (1.332c–334b)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E03_Does_The_Just_Man_Harm_Anyone_Enter_Thrasymachus",
+   "title": "Does the Just Man Harm Anyone? Enter Thrasymachus",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book I",
+   "stephanus": "1.334c–339b",
+   "book_chapters": [
+    1,
+    2
+   ],
+   "dossier_words": 3208,
+   "sources": [
+    {
+     "file": "sec_01_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Speaking of Friends… (1.334c–335a)"
+    },
+    {
+     "file": "sec_01_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "But Does the Just Person Harm Anyone? (1.335b–336a)"
+    },
+    {
+     "file": "sec_02_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_02_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Enter Thrasymachus: Justice Is Whatever Benefits the Powerful (1.336a–39b)"
+    },
+    {
+     "file": "sec_02_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Five Arguments Against Thrasymachus’ Definition of Justice"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E04_Justice_Is_The_Advantage_Of_The_Stronger",
+   "title": "Justice Is the Advantage of the Stronger",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book I",
+   "stephanus": "1.338c–348b",
+   "book_chapters": [
+    2
+   ],
+   "dossier_words": 4388,
+   "sources": [
+    {
+     "file": "sec_02_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Error Argument (1.338c–343a)"
+    },
+    {
+     "file": "sec_02_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Craft Argument (1.341c–348b)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E05_Taming_Thrasymachus_Three_Arguments_That_Justice_Pays",
+   "title": "Taming Thrasymachus: Three Arguments That Justice Pays",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book I",
+   "stephanus": "1.348b–354c",
+   "book_chapters": [
+    2
+   ],
+   "dossier_words": 4907,
+   "sources": [
+    {
+     "file": "sec_02_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Outdoing Argument (1.348b–350d)"
+    },
+    {
+     "file": "sec_02_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Common Purpose Argument (1.350d–352d)"
+    },
+    {
+     "file": "sec_02_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Function Argument (1.352d–354c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E06_The_Ring_Of_Gyges_Glaucons_Challenge",
+   "title": "The Ring of Gyges: Glaucon's Challenge",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book II",
+   "stephanus": "2.357a–362c",
+   "book_chapters": [
+    3
+   ],
+   "dossier_words": 4609,
+   "sources": [
+    {
+     "file": "sec_03_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_03_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Three Kinds of Goods (2.357a–358a)"
+    },
+    {
+     "file": "sec_03_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Glaucon’s Three Thrasymachan Theses (2.358a–362c)"
+    },
+    {
+     "file": "sec_03_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Thrasymachan Thesis #1: Justice is Conventional, Not Natural (2.358e–359b)"
+    },
+    {
+     "file": "sec_03_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Thrasymachan Thesis #2: Those Who Act Justly Do So Unwillingly (2.359b–360d)"
+    },
+    {
+     "file": "sec_03_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Thrasymachan Thesis #3: The Unjust Person is Happier than the Just Person (2.360e–362c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E07_From_The_City_Of_Pigs_To_Censoring_Homer",
+   "title": "From the City of Pigs to Censoring Homer",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Books II–III",
+   "stephanus": "2.362d–3.392c",
+   "book_chapters": [
+    3,
+    4
+   ],
+   "dossier_words": 3960,
+   "sources": [
+    {
+     "file": "sec_03_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Adeimantus Ups the Ante (2.362d–367e)"
+    },
+    {
+     "file": "sec_03_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Socrates’ Plan: Investigate Personal Justice by Investigating Political Justice (2.367e–369a)"
+    },
+    {
+     "file": "sec_03_08",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "A False Start: Socrates’ Rustic Utopia (2.369b–373a)"
+    },
+    {
+     "file": "sec_04_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_04_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Supervising the Storytellers: Musical and Poetic Content (2.376c–3.392c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E08_Music_Gymnastics_And_The_Noble_Lie",
+   "title": "Music, Gymnastics and the Noble Lie",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book III",
+   "stephanus": "3.392c–417b",
+   "book_chapters": [
+    4
+   ],
+   "dossier_words": 4661,
+   "sources": [
+    {
+     "file": "sec_04_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Supervising the Storytellers: Musical and Poetic Style (3.392c–401d)"
+    },
+    {
+     "file": "sec_04_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Aesthetically Beautiful and the Morally Beautiful (3.401d–403c, 412b–e)"
+    },
+    {
+     "file": "sec_04_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Physical Education—and Food (3.403c–405a)"
+    },
+    {
+     "file": "sec_04_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Symptoms of Poorly Educated Cities: Too Many Lawyers and Doctors (3.405a–408c)"
+    },
+    {
+     "file": "sec_04_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Harmony between Musical and Physical Education (3.410a–412b)"
+    },
+    {
+     "file": "sec_04_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Noble Falsehood (3.414b–417b)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E09_Building_The_Ideal_City_Wisdom_And_Courage",
+   "title": "Building the Ideal City: Wisdom and Courage",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book IV",
+   "stephanus": "4.419a–430c",
+   "book_chapters": [
+    5
+   ],
+   "dossier_words": 3664,
+   "sources": [
+    {
+     "file": "sec_05_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_05_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Happiness: Parts and Wholes, Individuals and Communities (4.419a–421c)"
+    },
+    {
+     "file": "sec_05_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Ideal City: Finishing Touches (4.421c–427d)"
+    },
+    {
+     "file": "sec_05_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Political Virtues (4.427d–434d)"
+    },
+    {
+     "file": "sec_05_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Cardinal Virtues"
+    },
+    {
+     "file": "sec_05_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Wisdom (4.428a–429a)"
+    },
+    {
+     "file": "sec_05_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Courage (4.429a–430c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E10_Moderation_And_Justice_In_The_City",
+   "title": "Moderation and Justice in the City",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book IV",
+   "stephanus": "4.430d–434d",
+   "book_chapters": [
+    5
+   ],
+   "dossier_words": 3628,
+   "sources": [
+    {
+     "file": "sec_05_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Moderation (4.430d–432b)"
+    },
+    {
+     "file": "sec_05_08",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Justice (4.432b–434d)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E11_The_Divided_Soul_Reason_Spirit_And_Appetite",
+   "title": "The Divided Soul: Reason, Spirit and Appetite",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book IV",
+   "stephanus": "4.434d–444e",
+   "book_chapters": [
+    6
+   ],
+   "dossier_words": 3166,
+   "sources": [
+    {
+     "file": "sec_06_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_06_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Platonic Psychology: The Divided Soul (4.434d–441c)"
+    },
+    {
+     "file": "sec_06_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Personal Virtues (4.441c–444e)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E12_Justice_As_Inner_Harmony_And_The_Three_Waves",
+   "title": "Justice as Inner Harmony, and the Three Waves",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Books IV–V",
+   "stephanus": "4.443c–5.451c",
+   "book_chapters": [
+    6,
+    7
+   ],
+   "dossier_words": 3541,
+   "sources": [
+    {
+     "file": "sec_06_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Personal Justice: Intrapersonal Being versus Interpersonal Doing (4.443c–444e)"
+    },
+    {
+     "file": "sec_07_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_07_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Literary Artistry as a Way of Doing Philosophy (5.449b–d)"
+    },
+    {
+     "file": "sec_07_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Three Waves (5.450a–451c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E13_Can_Women_Rule_Is_Plato_A_Feminist",
+   "title": "Can Women Rule? Is Plato a Feminist?",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book V",
+   "stephanus": "5.451c–457c",
+   "book_chapters": [
+    7
+   ],
+   "dossier_words": 4070,
+   "sources": [
+    {
+     "file": "sec_07_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The First Wave: Can Women Be Guardians? (5.451c–457c)"
+    },
+    {
+     "file": "sec_07_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Is Plato a Feminist?"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E14_Abolishing_The_Family_And_The_Philosopher_King",
+   "title": "Abolishing the Family, and the Philosopher-King",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book V",
+   "stephanus": "5.457c–476d",
+   "book_chapters": [
+    7,
+    8
+   ],
+   "dossier_words": 4121,
+   "sources": [
+    {
+     "file": "sec_07_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Second Wave: Extending the Household to the Polis (5.457c–471b)"
+    },
+    {
+     "file": "sec_08_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_08_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Philosopher-Kings and Political Animals (5.471c–474c)"
+    },
+    {
+     "file": "sec_08_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Philosophers and Non-Philosophers"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E15_The_Powers_Argument_Knowledge_Belief_And_The_Forms",
+   "title": "The Powers Argument: Knowledge, Belief and the Forms",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book V",
+   "stephanus": "5.476a–480a",
+   "book_chapters": [
+    8
+   ],
+   "dossier_words": 4276,
+   "sources": [
+    {
+     "file": "sec_08_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Plato’s Metaphysical Elevator"
+    },
+    {
+     "file": "sec_08_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Marrying Metaphysics and Epistemology: The Powers Argument (5.476d–480a)"
+    },
+    {
+     "file": "sec_08_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Problems with the Powers Argument"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E16_Infallible_Knowledge_And_The_Philosophers_Nature",
+   "title": "Infallible Knowledge and the Philosopher's Nature",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Books V–VI",
+   "stephanus": "5.477e–6.487a",
+   "book_chapters": [
+    8,
+    9
+   ],
+   "dossier_words": 4148,
+   "sources": [
+    {
+     "file": "sec_08_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Plato’s Fallible Conception of Infallibility"
+    },
+    {
+     "file": "sec_09_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_09_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Loving the Truth"
+    },
+    {
+     "file": "sec_09_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Intellectual Virtues and Character Virtues"
+    },
+    {
+     "file": "sec_09_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Virtues of Personal Style"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E17_The_Ship_Of_State_And_The_Form_Of_The_Good",
+   "title": "The Ship of State and the Form of the Good",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book VI",
+   "stephanus": "6.487b–505d",
+   "book_chapters": [
+    9,
+    10
+   ],
+   "dossier_words": 4054,
+   "sources": [
+    {
+     "file": "sec_09_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "A Game of Checkers (6.487b–d)"
+    },
+    {
+     "file": "sec_09_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Ship of State Sails the Third Wave (6.487e–490e)"
+    },
+    {
+     "file": "sec_09_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Tending the Beast (6.490e–495a)"
+    },
+    {
+     "file": "sec_09_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Shelter from the Storm (6.496a–497c)"
+    },
+    {
+     "file": "sec_10_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_10_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "What the Good Is Not (6.505a-d)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E18_The_Sun_And_The_Divided_Line",
+   "title": "The Sun and the Divided Line",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book VI",
+   "stephanus": "6.506d–511e",
+   "book_chapters": [
+    10
+   ],
+   "dossier_words": 4783,
+   "sources": [
+    {
+     "file": "sec_10_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Analogy of the Sun (6.506d–509d)"
+    },
+    {
+     "file": "sec_10_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Divided Line (6.509e–511e)"
+    },
+    {
+     "file": "sec_10_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Hypotheses and First Principles in the Divided Line"
+    },
+    {
+     "file": "sec_10_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Dialectic and Understanding"
+    },
+    {
+     "file": "sec_10_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Socrates’ Hypothetical Method"
+    },
+    {
+     "file": "sec_10_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Dialectic: It’s No Game"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E19_The_Allegory_Of_The_Cave",
+   "title": "The Allegory of the Cave",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book VII",
+   "stephanus": "7.514a–519b",
+   "book_chapters": [
+    11
+   ],
+   "dossier_words": 3286,
+   "sources": [
+    {
+     "file": "sec_11_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_11_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Stages in the Cave Allegory"
+    },
+    {
+     "file": "sec_11_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Trouble in Paradise: The Powers Argument Casts a Shadow on the Cave Allegory"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E20_Going_Back_Down_Into_The_Cave",
+   "title": "Going Back Down into the Cave",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book VII",
+   "stephanus": "7.519b–521b",
+   "book_chapters": [
+    11
+   ],
+   "dossier_words": 3268,
+   "sources": [
+    {
+     "file": "sec_11_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Going Back Down into the Cave (7.519b–520b)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E21_The_Decline_Of_The_Ideal_City_Timocracy_Oligarchy_Democracy",
+   "title": "The Decline of the Ideal City: Timocracy, Oligarchy, Democracy",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book VIII",
+   "stephanus": "8.543a–562a",
+   "book_chapters": [
+    12
+   ],
+   "dossier_words": 4678,
+   "sources": [
+    {
+     "file": "sec_12_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_12_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Aristocratic City and Soul (8.543a–547c)"
+    },
+    {
+     "file": "sec_12_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Timocratic City and Soul (8.547c–550c)"
+    },
+    {
+     "file": "sec_12_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Oligarchic City and Soul (8.550c–555b)"
+    },
+    {
+     "file": "sec_12_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Democratic City and Soul (8.555b–562a)"
+    },
+    {
+     "file": "sec_12_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Interlude: Necessary versus Unnecessary Appetites"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E22_From_Democracy_To_Tyranny",
+   "title": "From Democracy to Tyranny",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Books VIII–IX",
+   "stephanus": "8.562a–9.580c",
+   "book_chapters": [
+    12,
+    13
+   ],
+   "dossier_words": 3362,
+   "sources": [
+    {
+     "file": "sec_12_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Democracy, Continued"
+    },
+    {
+     "file": "sec_12_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Tyrannical City and Soul (8.562a–9.576b)"
+    },
+    {
+     "file": "sec_12_08",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Interlude: Lawless versus Lawful Desires"
+    },
+    {
+     "file": "sec_12_09",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Tyranny, Continued"
+    },
+    {
+     "file": "sec_13_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_13_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Argument #1: Comparing Characters (9.576b–580c)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E23_True_Pleasure_And_The_Philosophers_Happiness",
+   "title": "True Pleasure and the Philosopher's Happiness",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book IX",
+   "stephanus": "9.580d–588a",
+   "book_chapters": [
+    13
+   ],
+   "dossier_words": 3321,
+   "sources": [
+    {
+     "file": "sec_13_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Argument #2: The Soul’s Distinct Pleasures (9.580d–583a)"
+    },
+    {
+     "file": "sec_13_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Argument #3: The Metaphysics of Pleasure (9.583b–588a)"
+    },
+    {
+     "file": "sec_13_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Contrary versus Contradictory Opposites"
+    },
+    {
+     "file": "sec_13_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Optical and Hedonic Illusions"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E24_The_Many_Headed_Beast_Within",
+   "title": "The Many-Headed Beast Within",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book IX",
+   "stephanus": "9.588b–592b",
+   "book_chapters": [
+    13
+   ],
+   "dossier_words": 3237,
+   "sources": [
+    {
+     "file": "sec_13_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Metaphysical Elevator and the Metaphysics of Pleasure"
+    },
+    {
+     "file": "sec_13_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Argument #3½: ‘an image of the soul in words’ (9.588b–590e)"
+    },
+    {
+     "file": "sec_13_08",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "Paternalism (9.590d)"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E25_The_Ancient_Quarrel_Between_Poetry_And_Philosophy",
+   "title": "The Ancient Quarrel Between Poetry and Philosophy",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book X",
+   "stephanus": "10.595a–608b",
+   "book_chapters": [
+    14
+   ],
+   "dossier_words": 4859,
+   "sources": [
+    {
+     "file": "sec_14_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    },
+    {
+     "file": "sec_14_01",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The ‘Ancient Quarrel’ between Poetry and Philosophy (10.595a–608b)"
+    },
+    {
+     "file": "sec_14_02",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Metaphysical Argument: Art Merely Makes Copies of Copies, and Thus is not Worth Taking Seriously"
+    },
+    {
+     "file": "sec_14_03",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Epistemological Argument: Artists Literally Do Not Know What They Are Talking and Painting about"
+    },
+    {
+     "file": "sec_14_04",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Moral Argument: Art Corrupts Even the Best of Us"
+    }
+   ]
+  },
+  {
+   "unit": "Republic_E26_The_Immortal_Soul_And_The_Myth_Of_Er",
+   "title": "The Immortal Soul and the Myth of Er",
+   "profile": "commentary",
+   "mode": "folio",
+   "republic": "Book X",
+   "stephanus": "10.608c–621d",
+   "book_chapters": [
+    14,
+    15
+   ],
+   "dossier_words": 4950,
+   "sources": [
+    {
+     "file": "sec_14_05",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "A Four-Part Soul?"
+    },
+    {
+     "file": "sec_14_06",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Immortality of the Soul (10.608c–614b)"
+    },
+    {
+     "file": "sec_14_07",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "The Myth of Er (10.614a–21c)"
+    },
+    {
+     "file": "sec_15_00",
+     "sections": "all",
+     "drop_end_matter": false,
+     "heading": "(chapter lead-in)"
+    }
+   ]
+  }
+ ]
+}

@@ -22,7 +22,8 @@ LLM step (clean, segment, script, verify_math, color_scheme, color_plan, manim c
 `scripts/pipeline.py` runs the deterministic steps (transcribe, tts,
 animate-render of pre-authored sources, compile, subtitle) and halts with the
 exact `render_step_prompt.py` command when it reaches a subagent-authored step.
-The only paid external service is ElevenLabs (TTS + Scribe transcription).
+The only paid external service the math/technical pipeline uses is ElevenLabs (TTS + Scribe
+transcription); the folio (humanities) pipeline adds image generation (see "Folio").
 
 ## Project Structure
 
@@ -31,7 +32,8 @@ ludium_video/
 ├── pipeline/                  # Output by lecture (e.g. pipeline/Calculus_1_Lecture_01/Video-1/)
 ├── inputs/                    # Source files you provide
 ├── scripts/                   # Pipeline scripts
-├── templates/                 # Manim system prompt + teaching style guide
+├── templates/                 # Manim system prompt, teaching style guide, folio director/scene prompts
+├── remotion/                  # Folio render harness (src/folio.tsx, fonts, paper textures)
 ├── docs/                      # ElevenLabs pronunciation dictionary reference
 └── .env                       # ElevenLabs credentials (NEVER commit)
 ```
@@ -93,7 +95,7 @@ wrote into the prose.)
 
 ### Pipeline Modes
 
-Two modes. Math is auto-detected from folder prefixes (`Calculus_`,
+Three modes. Math is auto-detected from folder prefixes (`Calculus_`,
 `Single_Variable_Calculus_`, `Multivariable_Calculus_`, `Linear_Algebra_`,
 `Statistics_`, `Probability_`, `Differential_Equations_`); otherwise pass a
 flag explicitly.
@@ -115,6 +117,40 @@ flag explicitly.
   engineering, physics). Frame classes are `math`/`code`/`visual`: math frames
   get `math_steps` + SymPy, code frames get `code_steps` (traced execution) and
   the Manim code-block layout, visual frames are free-form.
+- **Folio** (`--folio`) — humanities (history, philosophy, literature, religion). See below.
+
+### Folio (humanities)
+
+Narration-first documentary with a Remotion "book of plates" visual track. Playbook:
+`.claude/skills/run-pipeline/references/phase-b-folio.md`.
+
+- **Sources:** open courses (e.g. Open Yale Courses lectures → transcribe → clean) or open
+  textbooks divided into ~20-minute episodes by a manifest (worked example
+  `docs/examples/plato_republic_episodes.json`: `scripts/obp_pdf_to_markdown.py` turns a
+  publisher PDF with a text layer into per-section Markdown; `clean_book_chapter.py --manifest`
+  with the `commentary` profile composes and cleans one episode). Details:
+  run-pipeline `references/sources.md` "Humanities sources".
+- **Segmentation:** a few LONG ~20-min videos, ~4,000 cleaned words each (3,000–5,000; the
+  script narrates ~75% of its dossier at 150 words/min). `pipeline.py run <L> --folio` sizes it
+  (`segment_concepts.target_video_count`); one video → `segment_concepts.py <L> --single-video
+  --folio`, more → `render_step_prompt.py segment --folio`.
+- **Two-stage scripts:** `content.txt` is a research DOSSIER with `[P1]…[Pn]` IDs.
+  `render_step_prompt.py argument --mode folio` → `argument.json` (thesis, 3–6 movements,
+  evidence by P-id, cut list), reviewed against the dossier (round 0); then
+  `render_step_prompt.py script --mode folio` injects the approved map and asks for ~75% of the
+  dossier's length, each frame tagged `movement` + `sources`. `audit_script.py` BLOCKs a
+  ≥10-word verbatim run outside quotes and CHECKs overlap, length ratio, unsourced figures,
+  filler, cadence and movement shape; `--argument` checks the map alone.
+- **Visual track (after TTS):** `build_narration_timeline.py` → a director subagent writes
+  `folio.json` (world, cast, 3–5 scenes/min on verbatim anchors, 6–10 generated assets/min,
+  an `off_screen` list) → `folio.py place` / `audit` → `folio.py assets` (OpenAI gpt-image;
+  maps on grounded Gemini Pro; every image normalised to one sepia duotone, objects become ink
+  cutouts) → scene-author subagents write free-form `frames/scene_NN.tsx` against
+  `remotion/src/folio.tsx` after LOOKING at the assets, iterating on `folio.py still --auto` →
+  `folio.py lint` / `render` / `sheet` / `compile` → `generate_subtitles.py`. Captions are
+  burned in, word by word, in a reserved band (y 872–1006).
+- `pipeline.py … --folio` runs transcribe/clean/segment and TTS; its animate/compile steps
+  halt with a pointer to the playbook. Setup: Node.js 18+, `cd remotion && npm ci`.
 
 ### Recompiling Video
 
@@ -264,7 +300,7 @@ fallback transcription — compile and subtitle must run serially.
 | `clean_book_chapter.py` | Scaffold a book-chapter clean (.adoc/.md/.txt → clean_prompt.txt for a subagent) |
 | `clean_slides_pptx.py` | Scaffold a PPTX-deck clean (extract + clean_prompt.txt for a subagent) |
 | `segment_concepts.py` | Materialize segmentation: `--apply RESPONSE.json` or `--single-video` |
-| `generate_scripts.py` | Script prompt templates (math/technical) + helpers |
+| `generate_scripts.py` | Script prompt templates (math/technical/folio) + argument-map helpers |
 | `verify_math.py` | SymPy helpers for math verification |
 | `setup_pronunciation_dict.py` | One-time: upload the bundled pronunciation dictionary, wire its ID into .env |
 | `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps (applies the pronunciation dictionary) |
@@ -272,8 +308,11 @@ fallback transcription — compile and subtitle must run serially.
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
 | `compile_video.py` | Compile frames + audio into final_video.mp4 |
+| `build_narration_timeline.py` | Folio: stack per-frame word timestamps into one narration timeline |
+| `folio.py` | Folio: place · audit · assets · refinish · grid · contact · prompt · still · lint · render · sheet · compile · status |
+| `obp_pdf_to_markdown.py` | Open-textbook PDF (text layer) → per-section markdown + footnotes + `sections.json` |
 | `generate_subtitles.py` | SRT subtitles from stored word timestamps (Scribe fallback) |
-| `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS (`--self-test`) |
+| `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS; folio dossier checks; `--argument` (`--self-test`) |
 | `audit_figure_updates.py` | Dated-lecture gate: trace every `figure_updates.json` refresh into `content_cleaned.txt`, require `source_url` (`--self-test`) |
 | `audit_frames.py` | Frame visual-QA: contact sheets + full-res busy-moment stills |
 | `utils/narration_check.py` | Pre-TTS gate: detects TTS-unsafe tokens in spoken narration |
@@ -282,6 +321,7 @@ fallback transcription — compile and subtitle must run serially.
 | `utils/verify_prompts.py` | verify_math / verify_code / color_plan prompt constants |
 | `utils/stt.py` | ElevenLabs Scribe transcription (all sources) |
 | `utils/script_parser.py` | script.json/script.md load/save |
+| `utils/ffmpeg_compile.py` | Segment-wise ffmpeg encode + concat demuxer (bounded memory; used by `folio.py compile`) |
 
 ## API Keys (.env)
 
@@ -292,4 +332,11 @@ ELEVENLABS_PRONUNCIATION_DICT_ID= # set by scripts/setup_pronunciation_dict.py (
                                   # math dictionary; extend it for your own content)
 ```
 
-No other keys. LLM steps run as Claude Code subagents under your subscription.
+No other keys for math/technical. LLM steps run as Claude Code subagents under your subscription.
+
+Folio (humanities) only — image generation, roughly US$5–7 per 20-minute episode:
+
+```env
+OPENAI_API_KEY=...                # gpt-image plates, portraits, objects (FOLIO_GPT_MODEL, default gpt-image-2)
+GOOGLE_CLOUD_API_KEY=...          # Gemini: grounded maps (and every image with FOLIO_DEFAULT_TIER=lite)
+```
