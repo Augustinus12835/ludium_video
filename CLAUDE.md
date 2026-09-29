@@ -337,6 +337,6 @@ No other keys for math/technical. LLM steps run as Claude Code subagents under y
 Folio (humanities) only — image generation, roughly US$5–7 per 20-minute episode:
 
 ```env
-OPENAI_API_KEY=...                # gpt-image plates, portraits, objects (FOLIO_GPT_MODEL, default gpt-image-2)
+OPENAI_API_KEY=...                # gpt-image plates, portraits, objects (FOLIO_GPT_MODEL, default gpt-image-2.5-sunburst; gpt-image-2 as fallback)
 GOOGLE_CLOUD_API_KEY=...          # Gemini: grounded maps (and every image with FOLIO_DEFAULT_TIER=lite)
 ```

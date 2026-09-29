@@ -197,7 +197,7 @@ Folio generates its images through two more services, on top of ElevenLabs:
 
 | Key (`.env`) | Service | Used for |
 |---|---|---|
-| `OPENAI_API_KEY` | [OpenAI](https://platform.openai.com) Images API (`gpt-image-2` by default; `FOLIO_GPT_MODEL` overrides) | engraved plates, portraits, objects and then-states |
+| `OPENAI_API_KEY` | [OpenAI](https://platform.openai.com) Images API (`gpt-image-2.5-sunburst` by default; set `FOLIO_GPT_MODEL=gpt-image-2` if your account lacks it) | engraved plates, portraits, objects and then-states |
 | `GOOGLE_CLOUD_API_KEY` | [Gemini API](https://aistudio.google.com/apikey) (Gemini 3 Pro Image with Google Search grounding) | maps, drawn from verified geography |
 
 Budget roughly **US$5–7 of images per 20-minute episode** (≈120–200 images at

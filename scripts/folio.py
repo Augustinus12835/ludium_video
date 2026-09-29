@@ -75,7 +75,7 @@ PRO = "gemini-3-pro-image"
 # Escalation ladder for stubborn assets: the default model, one reroll on it, then a
 # stronger model. Maps stay on grounded Gemini Pro.
 TIERS = {"lite": FLASH, "flash": "gemini-3.1-flash-image", "pro": PRO,
-         "gpt": os.getenv("FOLIO_GPT_MODEL", "gpt-image-2")}
+         "gpt": os.getenv("FOLIO_GPT_MODEL", "gpt-image-2.5-sunburst")}
 LADDER = ["lite", "flash", "gpt"]
 # Default rung for folio assets: OpenAI gpt-image (in an A/B against Gemini flash-lite it
 # gave far more detail and instruction-following — correct counts, recognisable objects —

@@ -15,7 +15,7 @@ render · compile · sheet · contact · status), `scripts/build_narration_timel
 `templates/folio_scene_prompt.md`.
 
 **Paid services beyond ElevenLabs.** Images: OpenAI `gpt-image` for plates, portraits, objects
-and then-states (`OPENAI_API_KEY`; model `gpt-image-2` unless `FOLIO_GPT_MODEL` names another)
+and then-states (`OPENAI_API_KEY`; model `gpt-image-2.5-sunburst` unless `FOLIO_GPT_MODEL` names another, e.g. `gpt-image-2`)
 and Gemini 3 Pro Image with Google Search grounding for maps (`GOOGLE_CLOUD_API_KEY`). Budget
 roughly US$5–7 of images per 20-minute episode (≈120–200 assets at ≈$0.04, maps ≈$0.13).
 `FOLIO_DEFAULT_TIER=lite` moves every non-map asset to Gemini flash-lite (then only the Google
