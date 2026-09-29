@@ -1,18 +1,26 @@
 # Ludium Video
 
-An AI-powered pipeline that produces educational videos — animated Manim
-visuals, natural narration, word-accurate subtitles — driven end-to-end from
-[Claude Code](https://claude.com/claude-code). A second, humanities pipeline
-(**folio**) turns open courses and open textbooks into illustrated documentary
-episodes — see [Humanities pipeline (folio)](#humanities-pipeline-folio).
+An AI-powered pipeline that produces educational videos — natural narration,
+word-accurate subtitles and animated visuals — driven end-to-end from
+[Claude Code](https://claude.com/claude-code). It covers two families of subjects:
+
+- **Math and technical** — calculus, linear algebra, statistics, physics, finance,
+  computer science: every frame a Manim animation, every calculation checked
+  with SymPy.
+- **Humanities** — history, philosophy, literature, religion: ~20-minute
+  illustrated documentary episodes (**folio**, "a book of plates") built on an
+  argued narration, with engraved plates, portraits, maps and word-by-word
+  captions — see [Humanities pipeline (folio)](#humanities-pipeline-folio).
 
 You provide the **source material** that grounds a topic: a reference text
-chapter (PDF, Markdown, AsciiDoc), a slide deck (PPTX), or a recorded talk
-(YouTube URL or raw video/audio). The pipeline transcribes and cleans the
-material, reorganizes it into self-contained concept videos, writes a
-pedagogically structured script grounded in the source, checks every
-calculation with SymPy, and renders each frame as a Manim animation
-synchronized to the ElevenLabs narration word-by-word.
+chapter or book (PDF, Markdown, AsciiDoc), a slide deck (PPTX), or a recorded
+talk or lecture (YouTube URL or raw video/audio) — including your own. The
+pipeline transcribes and cleans the material, reorganizes it into
+self-contained videos, writes a script grounded in the source, and renders the
+visuals synchronized to the ElevenLabs narration word by word. For math and
+technical subjects it checks every calculation with SymPy and animates each
+frame in Manim; for the humanities it writes an argument map before the
+narration and composes each scene in Remotion.
 
 ```
 Source → Transcribe → Clean → Segment → per video: Script → Verify math → TTS → Animate → Compile → Subtitles
@@ -177,19 +185,17 @@ Source → Clean (research dossier) → Segment (~20-min episodes) → per video
 
 ### Sources
 
-Build folio videos only from material you are free to adapt:
+Folio takes the same inputs as the math and technical pipeline. Two examples:
 
-- **Open courses** — recorded university lectures under an open licence, such as
-  [Open Yale Courses](https://oyc.yale.edu) (CC BY-NC-SA). Use the YouTube or
-  recording input with `--folio`.
-- **Open textbooks** — e.g. [Open Book Publishers](https://www.openbookpublishers.com)
-  titles (CC BY). An episode manifest divides the book into ~20-minute episodes;
+- **A recorded lecture course** — your own lectures, or a published course such as
+  [Open Yale Courses](https://oyc.yale.edu). Use the YouTube or recording input
+  with `--folio`.
+- **A book** — e.g. an [Open Book Publishers](https://www.openbookpublishers.com)
+  title. An episode manifest divides the book into ~20-minute episodes;
   `docs/examples/plato_republic_episodes.json` does this for Sean McAleer's
   *Plato's 'Republic': An Introduction* (26 episodes), and
   `scripts/obp_pdf_to_markdown.py` converts a publisher PDF with a text layer
   into one Markdown file per section, no OCR.
-
-Credit the source (and its licence) in every published description.
 
 ### Additional API keys
 

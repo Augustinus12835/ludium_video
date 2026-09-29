@@ -124,8 +124,8 @@ flag explicitly.
 Narration-first documentary with a Remotion "book of plates" visual track. Playbook:
 `.claude/skills/run-pipeline/references/phase-b-folio.md`.
 
-- **Sources:** open courses (e.g. Open Yale Courses lectures → transcribe → clean) or open
-  textbooks divided into ~20-minute episodes by a manifest (worked example
+- **Sources:** any input the other modes take — e.g. a recorded lecture course (your own, or
+  Open Yale Courses → transcribe → clean) or a book divided into ~20-minute episodes by a manifest (worked example
   `docs/examples/plato_republic_episodes.json`: `scripts/obp_pdf_to_markdown.py` turns a
   publisher PDF with a text layer into per-section Markdown; `clean_book_chapter.py --manifest`
   with the `commentary` profile composes and cleans one episode). Details:

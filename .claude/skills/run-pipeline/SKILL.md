@@ -56,7 +56,7 @@ stop only if it's unparseable.
 `Calculus_`, `Linear_Algebra_`, `Statistics_`, `Probability_`, `Differential_Equations_`);
 `--technical` for math + diagrams + code (finance, CS, engineering, physics); `--folio` for
 humanities (history, philosophy, literature, religion) — a narration-first documentary with a
-Remotion "book of plates" visual track, sourced from open courses or open textbooks
+Remotion "book of plates" visual track, from lectures or books like any other mode
 (references/sources.md "Humanities sources"). One is required — there is no default mode.
 
 **Voice.** Narration uses `ELEVENLABS_VOICE_ID` from `.env` — pass no `--voice-id`.

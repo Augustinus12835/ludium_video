@@ -87,15 +87,14 @@ Phase B chain.
 
 ## Humanities sources (folio mode)
 
-Folio videos are built from material you are free to adapt. Two kinds work well:
+Folio takes the same inputs as math and technical runs. Two examples:
 
-- **Open courses** — recorded university lectures published under an open licence (e.g. Open
-  Yale Courses, CC BY-NC-SA). Run the YouTube or recording path above with `--folio`:
-  transcribe → clean (the standard clean prompt) → coverage gate → segment. Record the course,
-  lecturer and licence in `pipeline/<L>/source_info.json` so the attribution travels with the
+- **A recorded lecture course** — the user's own lectures or a published course (e.g. Open
+  Yale Courses). Run the YouTube or recording path above with `--folio`:
+  transcribe → clean (the standard clean prompt) → coverage gate → segment. Record the source
+  (course, lecturer, licence if any) in `pipeline/<L>/source_info.json` so it travels with the
   video.
-- **Open textbooks** — books under an open licence (e.g. Open Book Publishers titles, CC BY).
-  Divide the book into ~20-minute **episodes** with a manifest, the same machinery as the
+- **A book** (e.g. an Open Book Publishers title). Divide the book into ~20-minute **episodes** with a manifest, the same machinery as the
   multi-chapter units above.
 
 Either way `content_cleaned.txt` is a research **dossier**, not a script: the folio script
@@ -104,7 +103,7 @@ video at ~4,000 cleaned words (3,000–5,000): `segment_concepts.target_video_co
 the count, and `render_step_prompt.py segment --folio` / `segment_concepts.py <L>
 --single-video --folio` use it (`pipeline.py run <L> --folio` does this automatically).
 
-### Open textbook → episodes (worked example: Plato's *Republic*)
+### Book → episodes (worked example: Plato's *Republic*)
 
 `docs/examples/plato_republic_episodes.json` divides Sean McAleer, *Plato's 'Republic': An
 Introduction* (Open Book Publishers 2020, CC BY 4.0) into 26 episodes of 3.2k–5k words, cut at
