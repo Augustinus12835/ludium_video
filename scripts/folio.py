@@ -132,8 +132,12 @@ def build_prompt(asset: dict, folio: dict, kind: str) -> str:
     cast = {c["id"]: c for c in folio.get("cast", []) if isinstance(c, dict) and c.get("id")}
     looks = [f"{cast[c]['name']}: {cast[c].get('look', '')}" for c in asset.get("cast", []) if c in cast]
     if looks:
-        parts.append("People in this picture, drawn exactly as described (and as in the reference "
-                     "portraits provided): " + " ".join(looks))
+        # A reference portrait is a likeness, not a pose: copying its head angle and gaze
+        # gave Alexander the Azara herm's upturned stare in every plate (ALX_E04).
+        parts.append("People in this picture, with the face, hair and build described here and "
+                     "shown in the reference portraits provided: " + " ".join(looks)
+                     + ". Take only the likeness from the reference portraits; each person's "
+                     "pose, expression and direction of gaze follow the subject described below.")
     if kind == "map":
         places = asset.get("places") or []
         if places:
@@ -638,6 +642,8 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     for r in refs:
         if not r.exists():
             return a["id"], f"WAIT (reference {r.name} not generated yet)"
+    if a.get("from"):
+        return import_one(vd, folio, a, force)
     prompt = build_prompt(a, folio, kind)
     tier = asset_tier(a, kind)
     model = TIERS[tier]
@@ -692,6 +698,42 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
         (lib / "key").write_text(key)
         (lib / "prompt.txt").write_text(prompt, encoding="utf-8")
     return a["id"], f"ok {kind} {used} {time.time() - t0:.0f}s{note}"
+
+
+def import_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
+    """An asset with `from` reuses an image already on disk (a plate from another
+    episode, a contact sheet, a render still) instead of generating one. `finish`
+    (default true) runs the house duotone like a generated image; `"finish": false`
+    keeps the pixels as they are (screenshots of rendered frames, which are already
+    in the house style and would lose their crimson/blue under the duotone)."""
+    src = REPO / a["from"]
+    if not src.exists():
+        return a["id"], f"FAIL from: {a['from']} not found"
+    out = asset_file(vd, folio, a)
+    kind = asset_kind(folio, a)
+    finish = a.get("finish", True)
+    key = json.dumps({"from": a["from"], "sha": sha(src), "k": kind, "finish": finish,
+                      "trim": a.get("trim")}, sort_keys=True)
+    keyf = out.with_suffix(out.suffix + ".key")
+    if out.exists() and keyf.exists() and keyf.read_text() == key and not force:
+        return a["id"], "cached"
+    raw = src.read_bytes()
+    raw_dir = vd / ASSET_DIR / "raw"
+    img = Image.open(io.BytesIO(raw)).convert("RGBA" if kind == "object" else "RGB")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    (raw_dir / f"{a['id']}.png").write_bytes(buf.getvalue())
+    if finish:
+        finish_and_record(vd, folio, a, buf.getvalue())
+    else:
+        if a.get("trim"):
+            l, t, r, b = a["trim"]
+            img = img.crop((round(img.width * l), round(img.height * t),
+                            round(img.width * (1 - r)), round(img.height * (1 - b))))
+        img.save(out, "PNG" if out.suffix == ".png" else "JPEG", quality=92)
+    (vd / ASSET_DIR / f"{a['id']}.model").write_text("import")
+    keyf.write_text(key)
+    return a["id"], f"ok {kind} import{'' if finish else ' (as-is)'}"
 
 
 def library_dir(vd: Path) -> Path:
@@ -763,7 +805,7 @@ def cmd_audit(a) -> int:
         errs.append("duplicate asset ids")
     idset = set(ids)
     for x in assets:
-        if not x.get("prompt"):
+        if not x.get("prompt") and not x.get("from"):
             errs.append(f"asset {x.get('id')}: no prompt")
         if x.get("of") and x["of"] not in idset:
             errs.append(f"asset {x['id']}: base '{x['of']}' not declared")

@@ -106,7 +106,9 @@ trim?: [left, top, right, bottom] (fractions of the raw image to cut — QA's fi
 model drew with a wide paper margin),
 world?: false (subject outside the series' period, e.g. a 15th-century library or a 1890s
 excavation), model?: "flash" | "gpt" (set by QA escalation, not by you), shared?: true (series-wide portraits/objects
-reused across episodes)}`.
+reused across episodes), from?: "<repo-relative image path>" (reuse an image already on disk —
+a plate from another episode, a contact sheet, a render still — instead of generating one; no
+prompt needed; add `"finish": false` to keep a screenshot's own colours)}`.
 
 Prompt rules (the model sees the house style clause + `world` + cast looks + your prompt):
 - 25–70 words: subject, action, viewpoint/shot, setting, light. Name concrete period detail.

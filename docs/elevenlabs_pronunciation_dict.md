@@ -54,7 +54,7 @@ The same `h`-voiced rule applies. Both `arc-` and `ar-` prefixes occur in textbo
 | `ζ` | `zeta` | /ˈzeɪtə/ | |
 | `η` | `eta` | /ˈeɪtə/ | |
 | `λ` | `lambda` | /ˈlæmdə/ | |
-| `μ` | `mu` | /mjuː/ | |
+| `μ` | `mew` | /mjuː/ | |
 | `ν` | `nu` | /njuː/ | Often confused visually with Latin `v`. |
 | `ξ` | `ksi` | /ksaɪ/ | TTS commonly mispronounces as "ex-eye". |
 | `ρ` | `rho` | /roʊ/ | Rhymes with "row", not "row" the verb. |

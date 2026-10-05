@@ -27,7 +27,8 @@ compaction):
   - phrases: ≤ ≥ ± √ (all modes); ≠ ∞ (math mode).
   - math mode: Greek names -> symbols ("delta X"/"delta-X" -> ΔX, "lambda two"
     -> λ₂), differentials ("d y over d x" -> dy/dx, "d squared y" -> d²y,
-    "partial f" -> ∂f), letter subscripts ("X-zero" -> X₀), "squared"/"cubed"
+    "partial f" -> ∂f), letter subscripts ("X-zero" -> X₀,
+    "epsilon-naught"/"v naught" -> ε₀/v₀), "squared"/"cubed"
     -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/",
     hyperbolic respellings ("sinch" -> sinh).
   - era letters after a number/century: "B C" -> BC, "A D" -> AD; and "A D"
@@ -83,6 +84,11 @@ _GREEK_UPPER = {'gamma': 'Γ', 'delta': 'Δ', 'theta': 'Θ', 'lambda': 'Λ',
 # Hyperbolic-function phonetic respellings (tts_rules.py) -> real notation.
 _WORD_MAP = {'sinch': 'sinh', 'tanch': 'tanh', 'koth': 'coth',
              'sheck': 'sech', 'co-sheck': 'csch'}
+
+# A subscript word after a letter or Greek name: the digit words plus "naught" ("epsilon-naught" ->
+# ε₀, "v naught" -> v₀; physics narration says "naught" ~5x as often as "zero"). "naught" is only
+# ever read as a subscript right after a symbol, so prose ("all for naught") is untouched.
+_SUB_WORDS = dict(_UNITS, naught=0)
 
 _SUB_DIGITS = {0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄',
                5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉'}
@@ -239,6 +245,10 @@ def _parse_cardinal(toks: List[_Tok], i: int) -> Optional[_NumParse]:
     consumed_any = False
     used_big_scale = False
     last_group: Optional[int] = None   # value of the last simple group
+    # state just before an 'and' after a scale, to back out of when the
+    # continuation turns out to be a second number ("sixteen hundred and
+    # twelve hundred" is 1600 and 1200, not 161200)
+    before_and: Optional[Tuple[int, int, int, int]] = None
     while j < n:
         t = toks[j]
         if j > i and t.lead:
@@ -258,6 +268,12 @@ def _parse_cardinal(toks: List[_Tok], i: int) -> Optional[_NumParse]:
             consumed_any = True
         elif low in _SCALES and consumed_any:
             if _SCALES[low] == 100:
+                if current >= 100:
+                    # a second 'hundred' inside one group: the words after
+                    # the 'and' start a new number — end before the 'and'
+                    if before_and is not None:
+                        j, total, current, n_words = before_and
+                    break
                 current = (current or 1) * 100
             else:
                 total += (current or 1) * _SCALES[low]
@@ -265,8 +281,11 @@ def _parse_cardinal(toks: List[_Tok], i: int) -> Optional[_NumParse]:
                 used_big_scale = True
             n_words += 1
             last_group = None
-            # a comma directly after a big scale word continues the number
-            if t.trail == ',' and j + 1 < n and not toks[j + 1].lead and \
+            # a comma directly after a big scale word continues the number;
+            # after 'hundred' it ends it ("A D one hundred, five centuries
+            # later" is 100 and 5, not 105)
+            if _SCALES[low] > 100 and t.trail == ',' and j + 1 < n and \
+                    not toks[j + 1].lead and \
                     _word_number_value(_hyphen_parts(toks[j + 1].core)) is not None:
                 j += 1
                 continue
@@ -274,6 +293,7 @@ def _parse_cardinal(toks: List[_Tok], i: int) -> Optional[_NumParse]:
                 not t.trail and j + 1 < n and not toks[j + 1].lead and \
                 _word_number_value(_hyphen_parts(toks[j + 1].core)) is not None:
             # "four hundred and twenty" — 'and' allowed right after a scale
+            before_and = (j, total, current, n_words)
             j += 1
             continue
         else:
@@ -451,10 +471,21 @@ def _listing_context(toks: List[_Tok], i: int) -> bool:
     return False
 
 
+def _proper_number_word(toks: List[_Tok], i: int) -> bool:
+    """A capitalized number word mid-sentence is part of a name — "the Thirty",
+    "the Twelve Olympians", "the Thirteenth Amendment" — and stays a word
+    (REP_E01 burned in "known as the 30")."""
+    core = toks[i].core
+    if not core[:1].isupper() or _sentence_initial(toks, i):
+        return False
+    return (_word_number_value(_hyphen_parts(core)) is not None
+            or _parse_ordinal(toks, i) is not None)
+
+
 def _pass_numbers(toks: List[_Tok]) -> None:
     i = 0
     while i < len(toks):
-        if toks[i].mathy:
+        if toks[i].mathy or _proper_number_word(toks, i):
             i += 1
             continue
         yr = _try_year(toks, i)
@@ -496,6 +527,61 @@ def _greek_symbol(name: str, sent_initial: bool) -> str:
     return _GREEK[low]
 
 
+# Hat forms: "I-hat" -> î, "r-hat" -> r̂. Spoken narration UPPERCASES every single-letter
+# variable (tts_rules.py), so the case heard carries no information about the written form and a
+# convention has to supply it. In this corpus the hat is a UNIT VECTOR — î ĵ k̂ r̂ n̂ û x̂ ŷ ẑ are
+# conventionally lowercase — so those letters are lowercased; every other letter keeps its case,
+# because a hatted capital elsewhere is an estimator or operator (Â, Θ̂). Corpus: i/j/k-hat 366,
+# I/J/K-hat 204, r/R-hat 92, x/X-hat 38, n-hat 24, u-hat 26.
+_HAT_LOWER = set("IJKRNUXYZ")
+_HAT_PRECOMPOSED = {'i': 'î', 'j': 'ĵ'}     # dotted letters need the precomposed glyph
+_COMBINING_CIRCUMFLEX = '\u0302'
+
+# Spoken letter pairs that are a conventional lowercase PRODUCT, not a subscript. Only these are
+# rewritten: every other "X-Y" pair in the corpus is a subscript, which the TTS rules deliberately
+# hyphen-bind ("A_x" -> "A-X"), and joining those would assert a product that isn't there.
+# Corpus: M-G 105, M-V 8, M-A 2.
+_CONVENTIONAL_PRODUCTS = {('M', 'G'): 'mg', ('M', 'V'): 'mv', ('M', 'A'): 'ma'}
+
+_TRIG_NAMES = {'sine': 'sin', 'cosine': 'cos', 'tangent': 'tan'}
+
+
+def _hat_form(letter: str) -> str:
+    ch = letter.lower() if letter in _HAT_LOWER else letter
+    return _HAT_PRECOMPOSED.get(ch, ch + _COMBINING_CIRCUMFLEX)
+
+
+_SUP_LETTERS = {'n': 'ⁿ', 'm': 'ᵐ', 'k': 'ᵏ', 'j': 'ʲ'}
+_SCALE_WORDS = {'hundred': 100, 'thousand': 1000}
+
+
+def _pass_space_powers(toks: List[_Tok], letters: frozenset) -> None:
+    """Named spaces raised to a power: "R-two" -> R², "F-N" -> Fⁿ, "C-four" -> C⁴,
+    "R-five-thousand" -> R⁵⁰⁰⁰.
+
+    Course-scoped (linear algebra): elsewhere "C-one" is a constant C₁ and the
+    generic letter+digit rule below must keep producing a subscript. Runs before
+    it so the space letters never reach that rule.
+    """
+    for t in toks:
+        parts = _hyphen_parts(t.core)
+        if len(parts) < 2 or t.mathy or parts[0] not in letters:
+            continue
+        rest = [p.lower() for p in parts[1:]]
+        if len(rest) == 1 and rest[0] in _SUP_LETTERS:
+            t.core, t.mathy = parts[0] + _SUP_LETTERS[rest[0]], True
+            continue
+        mult = 1
+        if len(rest) >= 2 and rest[-1] in _SCALE_WORDS:
+            mult = _SCALE_WORDS[rest[-1]]
+            rest = rest[:-1]
+        val = _word_number_value(rest)
+        if val is None:
+            continue
+        t.core = parts[0] + ''.join(_SUP_MAP[c] for c in str(val * mult))
+        t.mathy = True
+
+
 def _pass_math_tokens(toks: List[_Tok]) -> None:
     """Math-mode single-token and adjacency conversions."""
     # 1) token-internal hyphen forms: delta-t, sigma-two, X-zero, lambda-I
@@ -508,10 +594,14 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
             sym = _greek_symbol(a, _sentence_initial(toks, i))
             if _is_single_letter(b) and b.lower() != 'd':
                 t.core, t.mathy = sym + b, True
-            elif b.lower() in _UNITS:
-                t.core, t.mathy = sym + _SUB_DIGITS[_UNITS[b.lower()]], True
-        elif _is_single_letter(a) and b.lower() in _UNITS:
-            t.core, t.mathy = a + _SUB_DIGITS[_UNITS[b.lower()]], True
+            elif b.lower() in _SUB_WORDS:
+                t.core, t.mathy = sym + _SUB_DIGITS[_SUB_WORDS[b.lower()]], True
+        elif _is_single_letter(a) and b.lower() in _SUB_WORDS:
+            t.core, t.mathy = a + _SUB_DIGITS[_SUB_WORDS[b.lower()]], True
+        elif _is_single_letter(a) and b.lower() == 'hat':
+            t.core, t.mathy = _hat_form(a), True
+        elif (a, b) in _CONVENTIONAL_PRODUCTS:
+            t.core, t.mathy = _CONVENTIONAL_PRODUCTS[(a, b)], True
 
     # 2) spaced adjacency forms
     i = 0
@@ -527,10 +617,15 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
             if _is_single_letter(nxt.core) and nxt.core.lower() != 'd':
                 _merge(toks, i, i + 2, sym + nxt.core)
                 continue
-            if nxt.core.lower() in _UNITS:
+            if nxt.core.lower() in _SUB_WORDS:
                 _merge(toks, i, i + 2,
-                       sym + _SUB_DIGITS[_UNITS[nxt.core.lower()]])
+                       sym + _SUB_DIGITS[_SUB_WORDS[nxt.core.lower()]])
                 continue
+        # any-case letter + "naught": "v naught" -> v₀ (a lowercase letter + digit word stays
+        # prose — "a one" — but "naught" after a letter is always a subscript)
+        if _is_single_letter(t.core) and nxt.core.lower() == 'naught' and not t.mathy:
+            _merge(toks, i, i + 2, t.core + '₀')
+            continue
         # UPPERCASE letter + digit word: "V one" -> V₁ — but not inside a
         # spelled initialism ("S H A two fifty six": prev is a bare letter)
         if _is_single_letter(t.core) and t.core.isupper() and \
@@ -564,6 +659,35 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
         if not t.mathy and t.core.lower() in _GREEK:
             t.core = _greek_symbol(t.core, _sentence_initial(toks, i))
             t.mathy = True
+
+
+
+def _pass_trig(toks: List[_Tok]) -> None:
+    """"sine theta" -> "sin θ", "cosine of theta" -> "cos θ". Only when the argument is a math
+    token or a bare single letter, so the geometric senses stay English ("the tangent line",
+    "tangent to the curve", "the cosine of the angle between them"). A connecting "of" is
+    absorbed, matching written notation; without one the argument keeps its own timing."""
+    i = 0
+    while i < len(toks) - 1:
+        t = toks[i]
+        name = _TRIG_NAMES.get(t.core.lower())
+        if not name or t.mathy or t.trail:
+            i += 1
+            continue
+        j = i + 1
+        if toks[j].core.lower() == 'of' and j + 1 < len(toks):
+            j += 1
+        arg = toks[j]
+        if not (arg.mathy or _is_single_letter(arg.core)) or \
+                not _clean_between(toks, i, j + 1):
+            i += 1
+            continue
+        if j == i + 1:
+            t.core, t.mathy = name, True    # leave the argument its own timing
+            i = j + 1
+        else:
+            _merge(toks, i, j + 1, name + ' ' + arg.core)
+            i += 1
 
 
 _PHRASES_ALWAYS = [(('less', 'than', 'or', 'equal', 'to'), '≤'),
@@ -730,6 +854,12 @@ def _denom_scope_ok(toks: List[_Tok], i: int) -> bool:
     end = i + 2
     if end >= len(toks) or toks[end - 1].trail or toks[end].lead:
         return True                 # closed by punctuation or end of stream
+    # A math token juxtaposed after a NUMERIC denominator multiplies into it:
+    # "fifteen over two pi squared" is 15/(2π²), but slashing only the "two"
+    # displays "15/2 π²", which reads as (15/2)·π². A function or letter
+    # denominator ("one over cos θ", "sin θ over sin φ") keeps its argument.
+    if toks[end].mathy and toks[i + 1].core.replace(',', '').replace('.', '').isdigit():
+        return False
     if toks[end].core.lower() not in _DENOM_CONTINUERS:
         return True
     # A continuer follows. This is the parallel-fractions shape ("one over m-one
@@ -766,6 +896,12 @@ def _pass_over_times(toks: List[_Tok]) -> None:
         if w in ('over', 'times') and not t.lead and not t.trail and \
                 not toks[i - 1].trail and not toks[i + 1].lead:
             a, b = toks[i - 1], toks[i + 1]
+            # A bare single letter is a legitimate operand ("L over two" -> L/2, "Y over X"
+            # -> Y/X). Mark it BEFORE the number-word upgrade below, so the letter can license
+            # the number on the other side.
+            for side in (a, b):
+                if not side.mathy and _is_single_letter(side.core):
+                    side.mathy = True
             # Upgrade a weak single number word on one side of a mathy token.
             # Skip a number that is a spoken fraction's numerator ("times two
             # thirds"): digitising it strands the denominator as a word.
@@ -802,6 +938,24 @@ def _pass_symbol_operands(toks: List[_Tok]) -> None:
                 nxt.core, nxt.mathy = str(v), True
 
 
+_DECADE_WORDS = {'twenties': 2, 'thirties': 3, 'forties': 4, 'fifties': 5,
+                 'sixties': 6, 'seventies': 7, 'eighties': 8, 'nineties': 9}
+
+
+def _pass_decades(toks: List[_Tok]) -> None:
+    """A spoken decade: "eighteen twenties" reaches here as "18 twenties" (the
+    number pass converts the century word alone) -> "1820s". Only a century
+    prefix 10–20 qualifies, so "the twenties" and "five sixties" stay put."""
+    i = 0
+    while i < len(toks) - 1:
+        a, b = toks[i], toks[i + 1]
+        tens = _DECADE_WORDS.get(b.core.lower())
+        if tens and a.core.isdigit() and 10 <= int(a.core) <= 20 and \
+                not a.trail and not b.lead:
+            _merge(toks, i, i + 2, f'{a.core}{tens}0s', mathy=False)
+        i += 1
+
+
 def _pass_era(toks: List[_Tok], math_mode: bool = False) -> None:
     i = 1
     while i < len(toks) - 1:
@@ -828,10 +982,13 @@ def _pass_era(toks: List[_Tok], math_mode: bool = False) -> None:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def compact_words(words: List[Dict], math_mode: bool = False) -> List[Dict]:
+def compact_words(words: List[Dict], math_mode: bool = False,
+                  space_letters: frozenset = frozenset()) -> List[Dict]:
     """Convert spoken-form word timestamps to compact display form.
 
     words: [{'word': str, 'start': float, 'end': float}, ...]
+    space_letters: letters naming spaces whose spoken number is an EXPONENT
+    ("R-two" -> R², not R₂) — linear-algebra courses pass {'R', 'C', 'F'}.
     Returns a new list in the same shape; merged phrases span the original
     words' time range. Timing of unchanged words is untouched.
     """
@@ -839,8 +996,12 @@ def compact_words(words: List[Dict], math_mode: bool = False) -> List[Dict]:
     _pass_word_map(toks)
     _pass_pow10(toks)
     _pass_numbers(toks)
+    _pass_decades(toks)
     if math_mode:
+        if space_letters:
+            _pass_space_powers(toks, space_letters)
         _pass_math_tokens(toks)
+        _pass_trig(toks)
     _pass_phrases(toks, math_mode)
     _pass_symbol_operands(toks)
     if math_mode:
