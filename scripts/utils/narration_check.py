@@ -27,6 +27,10 @@ It DETECTS only — it never rewrites text. False positives are expected and fin
   variable_a    "a one"/"a-two" (var a_1), or a bare variable a ("a times t", "a of t",
                 "a-t", "slope a.")          -> uppercase the variable ("A-one"; "A times t", "A of t", "A-t")
   sentence_a    sentence-initial "A" / "A-hat" / "A-X"  -> lead with the noun ("Matrix A times …")  [read as "uh"; hyphen doesn't rescue it]
+  alias         sinh / mu-hat / CAPM / i.e. -> the alias library's spoken form ("sinch",
+                "mew-hat", "cap-M", "that is"); scripts/utils/tts_aliases.py is the table and
+                the subtitles compact the alias back. Math-scope entries (hyperbolics, mu /
+                rho / chi, V) are checked only in Manim scripts (frames with a frame_class).
 
 Spoken source per frame mirrors generate_tts_elevenlabs.get_natural_narration():
   - script.json frames[N].narration for every frame class (the norm since 2026-08-30 —
@@ -37,6 +41,8 @@ Spoken source per frame mirrors generate_tts_elevenlabs.get_natural_narration():
 import json
 import re
 from pathlib import Path
+
+from scripts.utils.tts_aliases import ALIASES, find_unaliased
 
 # Numbers, but not when embedded in a longer alnum/identifier blob (those are caught as
 # hex/opaque). Bounded so "86,400" / "3.14" / "1983" match but "1903a30c" does not.
@@ -216,15 +222,22 @@ def _bare_variable_a(text):
     return out
 
 
+# Initialisms the alias library respells ("CAPM" -> "cap-M") are reported as `alias` instead, so
+# the gate never gives two contradictory fixes for one token.
+_ALIASED_INITIALISMS = {a.written for a in ALIASES if a.written.isupper()}
+
+
 def _acronyms(text):
-    out = [t for t in _ACRONYM.findall(text) if t.upper() not in _ACRONYM_OK]
+    out = [t for t in _ACRONYM.findall(text)
+           if t.upper() not in _ACRONYM_OK and t not in _ALIASED_INITIALISMS]
     # allowlist check uses both the token and its stem, so an allowlisted read-as-word
     # initialism stays clean in its plural form too ("ASIC" -> "ASICs").
     out += [t for t in _MIXED_ACRONYM.findall(text)
             if t.upper() not in _ACRONYM_OK
-            and t.rstrip("abcdefghijklmnopqrstuvwxyz").upper() not in _ACRONYM_OK]
+            and t.rstrip("abcdefghijklmnopqrstuvwxyz").upper() not in _ACRONYM_OK
+            and t.rstrip("abcdefghijklmnopqrstuvwxyz") not in _ALIASED_INITIALISMS]
     out += [m.group(0) for m in _SUFFIXED_ACRONYM.finditer(text)
-            if m.group(1).upper() not in _ACRONYM_OK]
+            if m.group(1).upper() not in _ACRONYM_OK and m.group(1) not in _ALIASED_INITIALISMS]
     return out
 
 
@@ -245,14 +258,20 @@ _DETECTORS = [
 ]
 
 
-def find_tts_issues(text: str):
+def _aliases(text, math):
+    return [f"{written} -> {spoken!r}" for written, spoken in find_unaliased(text, math)]
+
+
+def find_tts_issues(text: str, math: bool = True):
     """Return a list of (category, token) for every TTS-unfriendly token in `text`.
-    Empty list = clean. De-duplicated per (category, token)."""
+    Empty list = clean. De-duplicated per (category, token). math=False (narration-only /
+    humanities scripts) skips the alias library's math-scope entries."""
     if not text:
         return []
     seen = set()
     out = []
-    for category, finder in _DETECTORS:
+    finders = _DETECTORS + [("alias", lambda t: _aliases(t, math))]
+    for category, finder in finders:
         for tok in finder(text):
             key = (category, tok)
             if key not in seen:
@@ -292,11 +311,13 @@ def scan_video_narration(video_dir):
         except (json.JSONDecodeError, OSError):
             math_frames = {}
 
+    frames = script.get("frames", [])
+    math = any(fr.get("frame_class") for fr in frames)    # Manim scripts declare a class
     offenders = []
-    for i, frame in enumerate(script.get("frames", [])):
+    for i, frame in enumerate(frames):
         num = frame.get("number", i)
         source, text = _spoken_text_for_frame(frame, num, math_frames)
-        issues = find_tts_issues(text)
+        issues = find_tts_issues(text, math)
         if issues:
             offenders.append({
                 "frame": num,
@@ -325,7 +346,9 @@ def format_report(offenders, video_dir) -> str:
     lines.append("  bare initialisms, code tokens, lowercase variable 'a' (indexed 'a one' ->")
     lines.append("  'A-one'; bare 'a times t'/'a of t'/'slope a' -> 'A times t'/'A of t'/'slope A'),")
     lines.append("  or a sentence starting with the name 'A' (read as the article")
-    lines.append("  'uh' — lead with the noun: 'Matrix A times ...'). Convert each in the spoken source")
+    lines.append("  'uh' — lead with the noun: 'Matrix A times ...'), or a written form the alias library")
+    lines.append("  respells (sinh -> 'sinch', mu-hat -> 'mew-hat', CAPM -> 'cap-M'; scripts/utils/tts_aliases.py —")
+    lines.append("  subtitles convert the alias back). Convert each in the spoken source")
     lines.append("  (script.json narration for every frame; a LEGACY math frame's natural_narration if present);")
     lines.append("  on-screen text keeps its normal form. Genuine false positive? Resume with")
     lines.append("  SKIP_NARRATION_CHECK=1 to bypass.")

@@ -159,14 +159,14 @@ def audit_frame(frame, idx, cue_schedule=True):
 
     if not cue_schedule:
         st["cues"] = 0
-        _audit_tts(f, num, narration)
+        _audit_tts(f, num, narration, cue_schedule)
         return f, st
 
     cues = CUE_RE.findall(ref)
     st["cues"] = len(cues)
     if not cues:
         f.append((num, "no-cues", "reference schedules nothing"))
-        _audit_tts(f, num, narration)
+        _audit_tts(f, num, narration, cue_schedule)
         return f, st
 
     # Continuation phrases in a listed cue (see CUE_LIST_RE). Only flag one that occurs
@@ -259,16 +259,16 @@ def audit_frame(frame, idx, cue_schedule=True):
         for ch in set(s) & set(RAW_MATH_GLYPHS):
             f.append((num, "raw-glyph", f"U+{ord(ch):04X} in quoted string: '{s[:40]}'"))
 
-    _audit_tts(f, num, narration)
+    _audit_tts(f, num, narration, cue_schedule)
     return f, st
 
 
-def _audit_tts(f, num, narration):
+def _audit_tts(f, num, narration, math=True):
     """TTS safety of the SPOKEN text: applies to every mode, narration-only included."""
     issues = []
     try:
         from scripts.utils.narration_check import find_tts_issues
-        issues = find_tts_issues(narration)
+        issues = find_tts_issues(narration, math)
     except Exception as e:                                    # noqa: BLE001
         f.append((num, "tts-check-unavailable", str(e)[:60]))
     for cat, tok in issues:

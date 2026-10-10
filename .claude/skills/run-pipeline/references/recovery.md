@@ -138,8 +138,8 @@ the animation re-aligns (CLAUDE.md "Fixing TTS / Narration").
   written verbatim into the SRT. Reword around it ("the iterative version"); the on-screen
   `Code()` keeps the real identifier.
 - A proper noun that survives ~3 `--resay` takes unchanged is a corrupted lexicon entry in the
-  voice. Fix it with a pronunciation-dictionary alias (`setup_pronunciation_dict.py`), which
-  keeps the SRT spelling correct, then resay.
+  voice. Add an alias to `scripts/utils/tts_aliases.py` (the subtitles map it back, so the SRT
+  keeps the real spelling), write the alias into the narration, then run `fix_tts_sentence.py`.
 - Sizing a re-TTS job from gate flags on finished audio overstates it ~10×: numerals, acronyms
   and code tokens sound fine; only hex literals actually mangle (dropping digits
   intermittently). Transcribe the worst frames first.

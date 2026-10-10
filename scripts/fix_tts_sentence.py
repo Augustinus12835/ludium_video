@@ -33,6 +33,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import scripts.generate_tts_elevenlabs as _tts  # noqa: E402
 from scripts.generate_tts_elevenlabs import call_elevenlabs_api, get_natural_narration  # noqa: E402
 
 SR = 44100
@@ -242,16 +243,27 @@ def main():
     ap.add_argument("--frame", type=int, action="append", help="frame number(s); omit = all changed")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--voice-id", default=None,
-                    help="ElevenLabs voice for regenerated sentences "
-                         "(default: ELEVENLABS_VOICE_ID from .env). Pass the video's actual "
-                         "voice when it differs from the current .env default, so the spliced "
-                         "sentence matches the existing audio.")
+                    help="Voice for regenerated sentences. Default: the voice recorded in "
+                         "audio/tts_meta.json (provider + voice + model), else ELEVENLABS_VOICE_ID "
+                         "from .env. Pass the video's actual ElevenLabs voice for a video voiced "
+                         "before tts_meta.json existed in a voice other than the .env default.")
     ap.add_argument("--resay", action="append", default=None,
                     help="Force re-synthesis of the sentence whose text matches this, in --voice-id, "
                          "at its original span (text unchanged). Repeatable. For voice repairs.")
     args = ap.parse_args()
 
     vd = Path(args.video_dir)
+
+    # Re-voice in the narrator that voiced the video (a different voice or model is audible
+    # mid-sentence). No meta = voiced by ElevenLabs before tts_meta.json existed.
+    meta = _tts.read_tts_meta(vd / "audio")
+    if meta and not args.voice_id:
+        _tts.apply_tts_meta(meta)
+        print(f"  [tts_meta] {_tts.PROVIDER}: voice {_tts.VOICE_ID} / {_tts.MODEL_ID}")
+    else:
+        _tts.activate_provider('elevenlabs')
+    _tts.check_provider_config()
+
     script = json.loads((vd / "script.json").read_text())
     script_frames = {int(f["number"]): f for f in script.get("frames", [])}
     mvp = vd / "math_verification.json"

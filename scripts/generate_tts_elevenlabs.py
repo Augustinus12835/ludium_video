@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 """
-TTS Audio Generation Script using ElevenLabs API
+TTS Audio Generation Script — ElevenLabs (default), Cartesia or HeyGen
 
 Generates one MP3 per frame from the script's flat narration text, spoken verbatim
 (a LEGACY math frame's natural_narration in math_verification.json is still honoured).
 Word-level timestamps come back with each synthesis and are saved next to the audio
 (audio/frame_N_timestamps.json) for downstream steps (animate, subtitles).
 
-Set ELEVENLABS_VOICE_ID in .env (override per run with --voice-id).
+Providers (all return the same mp3 + word-timestamp shape, so nothing downstream branches):
+  elevenlabs  default — ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID (override per run: --voice-id)
+  cartesia    --profile cartesia  — CARTESIA_API_KEY + CARTESIA_VOICE_ID (CARTESIA_TTS_MODEL,
+              default sonic-3.6)
+  heygen      --profile heygen    — HEYGEN_API_KEY + HEYGEN_VOICE_ID
+TTS_PROVIDER=cartesia|heygen|elevenlabs sets the default for every run instead.
+
+There is no provider pronunciation dictionary: narration is voiced VERBATIM, and a token voices
+misread is respelled in the narration itself from the alias library
+(scripts/utils/tts_aliases.py), which the subtitles map back to the written form. Switching
+providers therefore needs no per-provider setup.
+
+audio/tts_meta.json records the provider/voice/model that voiced a video. A resumed video
+finishes in that narrator, and fix_tts_sentence.py re-voices sentences in it.
 """
 
 import os
@@ -40,36 +53,108 @@ for env_path in env_paths:
 
 # API Configuration
 ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
-VOICE_ID = os.getenv('ELEVENLABS_VOICE_ID')
-MODEL_ID = "eleven_multilingual_v2"  # Multilingual model
+ELEVENLABS_VOICE_ID = os.getenv('ELEVENLABS_VOICE_ID')
+# eleven_multilingual_v2 by default; eleven_turbo_v2_5 costs half the credits and sounds close
+# with a cloned voice — set ELEVENLABS_TTS_MODEL to switch.
+ELEVENLABS_MODEL_ID = os.getenv('ELEVENLABS_TTS_MODEL', 'eleven_multilingual_v2')
 OUTPUT_FORMAT = "mp3_44100_192"  # 44.1kHz, 192kbps — matches final AAC 192k target
 
-# Optional ElevenLabs pronunciation dictionary, applied to every synthesis so
-# math/Greek tokens spoken as words come out right ("rho"->roe, "pi"->pie, hyperbolic
-# functions, etc. — see docs/elevenlabs_pronunciation_dict.pls). A web/dashboard dictionary
-# is NOT auto-applied to the API; it must be attached per request via a locator. We key by
-# dictionary ID only (no version) so the LATEST dictionary version is always used — editing
-# the dict's rules needs no code/env change. Unset -> disabled. The dashboard returns the
-# alignment against the ORIGINAL input text, so on-screen subtitles keep the spelled-out word
-# (e.g. "rho") while only the spoken audio changes.
-PRONUNCIATION_DICT_ID = os.getenv('ELEVENLABS_PRONUNCIATION_DICT_ID', '').strip()
+# Cartesia (Sonic). A Pro Voice Clone ignores speed/volume (it learned them from its training
+# audio), so no generation_config is sent. Pin a dated snapshot (e.g. sonic-3.6-2026-08-27) in
+# CARTESIA_TTS_MODEL if later sentence fixes must use exactly the same model.
+CARTESIA_API_KEY = os.getenv('CARTESIA_API_KEY')
+CARTESIA_VOICE_ID = os.getenv('CARTESIA_VOICE_ID')
+CARTESIA_MODEL_ID = os.getenv('CARTESIA_TTS_MODEL', 'sonic-3.6')
+CARTESIA_VERSION = '2026-08-14'
+CARTESIA_TTS_URL = 'https://api.cartesia.ai/tts/sse'
+CARTESIA_SAMPLE_RATE = 44100
+CARTESIA_MAX_CHARS = int(os.getenv('CARTESIA_MAX_CHARS', '3000'))   # longer frames: sentence chunks
+
+# HeyGen Voice. Word timestamps come only from the STREAMING endpoint; 5,000 characters per
+# request (longer frames are chunked at sentence ends). expressiveness_boost applies to instant
+# voices only (0-1; API default 1.0, HeyGen Studio's 0.5).
+HEYGEN_API_KEY = os.getenv('HEYGEN_API_KEY')
+HEYGEN_VOICE_ID = os.getenv('HEYGEN_VOICE_ID')
+HEYGEN_MODEL_ID = 'heygen-voice-1'
+HEYGEN_TTS_URL = 'https://api.heygen.com/v3/models/audio/tts/stream'
+HEYGEN_MAX_CHARS = 5000
+HEYGEN_EXPRESSIVENESS = float(os.getenv('HEYGEN_EXPRESSIVENESS', '0.5'))
+
+PROVIDERS = {
+    'elevenlabs': ('ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'),
+    'cartesia': ('CARTESIA_API_KEY', 'CARTESIA_VOICE_ID'),
+    'heygen': ('HEYGEN_API_KEY', 'HEYGEN_VOICE_ID'),
+}
+TTS_META = 'tts_meta.json'   # audio/tts_meta.json: which provider/voice/model voiced this video
+PROVIDER = 'elevenlabs'
+VOICE_ID = ELEVENLABS_VOICE_ID
+MODEL_ID = ELEVENLABS_MODEL_ID
+EXPLICIT_PROVIDER = False    # set by --profile / --voice-id: never auto-adopt a video's recorded voice
 
 
-def _pronunciation_locators():
-    """Build the pronunciation-dictionary locator list (latest version), or None if unset."""
-    if not PRONUNCIATION_DICT_ID:
-        return None
+def activate_provider(name: str) -> None:
+    """Route every synthesis in this process through `name` with its .env voice/model."""
+    global PROVIDER, VOICE_ID, MODEL_ID
+    if name not in PROVIDERS:
+        raise SystemExit(f"✗ Unknown TTS provider {name!r} ({' | '.join(PROVIDERS)})")
+    PROVIDER = name
+    VOICE_ID, MODEL_ID = {
+        'elevenlabs': (ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL_ID),
+        'cartesia': (CARTESIA_VOICE_ID, CARTESIA_MODEL_ID),
+        'heygen': (HEYGEN_VOICE_ID, HEYGEN_MODEL_ID),
+    }[name]
+
+
+def check_provider_config() -> None:
+    """Exit with a clear message if the active provider's key or voice is missing."""
+    key_var, voice_var = PROVIDERS[PROVIDER]
+    if not os.getenv(key_var):
+        raise SystemExit(f"✗ {PROVIDER} TTS needs {key_var} in .env")
+    if not VOICE_ID:
+        raise SystemExit(f"✗ {PROVIDER} TTS needs {voice_var} in .env (the voice to narrate in)")
+
+
+_env_provider = os.getenv('TTS_PROVIDER', '').strip().lower()
+if _env_provider:
+    activate_provider(_env_provider)
+
+
+def current_tts_meta() -> Dict:
+    meta = {'provider': PROVIDER, 'voice_id': VOICE_ID, 'model_id': MODEL_ID}
+    if PROVIDER == 'heygen':
+        meta['expressiveness'] = HEYGEN_EXPRESSIVENESS
+    return meta
+
+
+def read_tts_meta(audio_dir) -> Optional[Dict]:
+    p = Path(audio_dir) / TTS_META
     try:
-        from elevenlabs import PronunciationDictionaryVersionLocator as _Loc
-        return [_Loc(pronunciation_dictionary_id=PRONUNCIATION_DICT_ID)]
-    except Exception:
-        return [{"pronunciation_dictionary_id": PRONUNCIATION_DICT_ID}]
+        return json.loads(p.read_text()) if p.exists() else None
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
-# Initialize ElevenLabs client
-# Generous read timeout (default is too short for long single-frame narration —
-# e.g. worked-example frames of ~6 min / ~6000 chars time out on read).
-client = ElevenLabs(api_key=ELEVENLABS_API_KEY, timeout=600)
+def apply_tts_meta(meta: Dict) -> None:
+    """Adopt a video's recorded provider/voice/model (re-voice in the same narrator)."""
+    global VOICE_ID, MODEL_ID, HEYGEN_EXPRESSIVENESS
+    activate_provider(meta.get('provider', 'elevenlabs'))
+    VOICE_ID = meta.get('voice_id') or VOICE_ID
+    MODEL_ID = meta.get('model_id') or MODEL_ID
+    if PROVIDER == 'heygen':
+        HEYGEN_EXPRESSIVENESS = float(meta.get('expressiveness', HEYGEN_EXPRESSIVENESS))
+
+
+_client = None
+
+
+def _elevenlabs_client():
+    # Generous read timeout (default is too short for long single-frame narration —
+    # e.g. worked-example frames of ~6 min / ~6000 chars time out on read).
+    global _client
+    if _client is None:
+        _client = ElevenLabs(api_key=ELEVENLABS_API_KEY, timeout=600)
+    return _client
+
 
 class TTSFrame:
     """Represents a single frame with narration for TTS generation"""
@@ -194,14 +279,21 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
     Word timestamps come back with the synthesis itself (no extra API call),
     letting downstream steps (animate, subtitles) skip Scribe re-transcription.
 
-    voice_id overrides the default narration voice; speed, when given, is passed
-    as a voice setting; language_code, when given, enforces a language on the
-    model (disables per-request language auto-detection).
+    voice_id overrides the default narration voice (an ElevenLabs voice); speed, when
+    given, is passed as a voice setting; language_code, when given, enforces a language
+    on the model (disables per-request language auto-detection).
+
+    With the Cartesia or HeyGen provider active (and no voice_id), the call is routed
+    there — same return shape, so callers never branch on the provider.
 
     Returns:
         (bytes, list): (audio file content, word timestamps [{'word','start','end'}, ...]
                         — empty list if alignment was unavailable)
     """
+    if PROVIDER == 'cartesia' and not voice_id:
+        return call_cartesia_api(text)
+    if PROVIDER == 'heygen' and not voice_id:
+        return call_heygen_api(text)
     if not ELEVENLABS_API_KEY:
         raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
 
@@ -211,7 +303,7 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
         kwargs = dict(
             text=text,
             voice_id=voice_id or VOICE_ID,
-            model_id=MODEL_ID,
+            model_id=MODEL_ID if PROVIDER == 'elevenlabs' else ELEVENLABS_MODEL_ID,
             output_format=OUTPUT_FORMAT,
             # Per-request read timeout — long single-frame narration
             # (~6 min / ~6000 chars worked examples) exceeds the SDK default.
@@ -222,11 +314,8 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
             kwargs['voice_settings'] = VoiceSettings(speed=speed)
         if language_code:
             kwargs['language_code'] = language_code
-        locators = _pronunciation_locators()
-        if locators:
-            kwargs['pronunciation_dictionary_locators'] = locators
 
-        response = client.text_to_speech.convert_with_timestamps(**kwargs)
+        response = _elevenlabs_client().text_to_speech.convert_with_timestamps(**kwargs)
 
         audio_bytes = base64.b64decode(response.audio_base_64)
 
@@ -245,12 +334,163 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
         raise Exception(f"ElevenLabs API error: {str(e)}")
 
 
+def _sentence_chunks(text, max_chars, provider):
+    """Split text over a per-request limit at sentence ends (whitespace kept attached)."""
+    import re as _re
+    if len(text) <= max_chars:
+        return [text]
+    limit = max_chars - 500
+    chunks, cur = [], ''
+    for sent in _re.split(r'(?<=[.!?])(?=\s)', text):
+        if cur and len(cur) + len(sent) > limit:
+            chunks.append(cur)
+            cur = sent
+        else:
+            cur += sent
+    chunks.append(cur)
+    if any(len(c) > max_chars for c in chunks):
+        raise Exception(f"{provider}: a single sentence exceeds {max_chars} characters")
+    return chunks
+
+
+def _pcm16_to_mp3(pcm: bytes, rate: int) -> bytes:
+    """Mono s16le PCM -> 44.1 kHz / 192k mp3 (the format every provider path returns)."""
+    import subprocess
+    return subprocess.run(['ffmpeg', '-v', 'error', '-f', 's16le', '-ar', str(rate), '-ac', '1',
+                           '-i', 'pipe:0', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '192k',
+                           '-f', 'mp3', 'pipe:1'],
+                          input=pcm, capture_output=True, check=True).stdout
+
+
+def _post_with_retry(url, body, headers, name):
+    """POST a streaming request, retrying 429 / 5xx with backoff."""
+    import requests
+    for attempt in range(6):
+        r = requests.post(url, json=body, headers=headers, stream=True, timeout=900)
+        if r.status_code == 429 or r.status_code >= 500:
+            wait = float(r.headers.get('Retry-After') or 5 * (attempt + 1))
+            print(f"  [{name}] HTTP {r.status_code}, retrying in {wait:.0f}s")
+            time.sleep(wait)
+            continue
+        if r.status_code != 200:
+            raise Exception(f"{name} API error: HTTP {r.status_code}: {r.text[:300]}")
+        return r
+    raise Exception(f"{name} API error: still rate-limited / failing after 6 attempts")
+
+
+def _cartesia_stream(text):
+    """One Cartesia SSE request -> (pcm s16le mono, words).
+
+    use_normalized_timestamps=false makes the words the transcript's own whitespace tokens,
+    punctuation included — the shape words_from_alignment yields."""
+    import base64
+    body = {"model_id": MODEL_ID, "transcript": text, "voice": {"mode": "id", "id": VOICE_ID},
+            "language": "en", "add_timestamps": True, "use_normalized_timestamps": False,
+            "output_format": {"container": "raw", "encoding": "pcm_s16le",
+                              "sample_rate": CARTESIA_SAMPLE_RATE}}
+    headers = {"Cartesia-Version": CARTESIA_VERSION, "Authorization": f"Bearer {CARTESIA_API_KEY}"}
+    r = _post_with_retry(CARTESIA_TTS_URL, body, headers, 'Cartesia')
+    pcm, toks, starts, ends = b'', [], [], []
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith('data:'):
+            continue
+        ev = json.loads(line[5:])
+        if ev.get('type') == 'chunk':
+            pcm += base64.b64decode(ev['data'])
+        elif ev.get('type') == 'timestamps':
+            wt = ev.get('word_timestamps') or {}
+            toks += wt.get('words', [])
+            starts += wt.get('start', [])
+            ends += wt.get('end', [])
+        elif ev.get('type') == 'error':
+            raise Exception(f"Cartesia stream error: {ev.get('title')}: {ev.get('message')}")
+        elif ev.get('type') == 'done':
+            break
+    if not pcm:
+        raise Exception("Cartesia stream returned no audio")
+    src = text.split()
+    if len(toks) != len(src):
+        raise Exception(f"Cartesia returned {len(toks)} word timestamps for {len(src)} narration words")
+    # Keep the narration's own spelling — fix_tts_sentence matches sentences on the source text.
+    words = [{'word': w, 'start': round(a, 3), 'end': round(b, 3)}
+             for w, a, b in zip(src, starts, ends)]
+    return pcm, words
+
+
+def call_cartesia_api(text):
+    """Cartesia synthesis with word timestamps -> (mp3 bytes, words)."""
+    if not CARTESIA_API_KEY:
+        raise ValueError("CARTESIA_API_KEY not found in environment variables")
+    pcm, words = b'', []
+    for chunk in _sentence_chunks(text, CARTESIA_MAX_CHARS, 'Cartesia'):
+        c_pcm, c_words = _cartesia_stream(chunk.strip())
+        offset = len(pcm) / 2 / CARTESIA_SAMPLE_RATE
+        words += [{'word': w['word'], 'start': round(w['start'] + offset, 3),
+                   'end': round(w['end'] + offset, 3)} for w in c_words]
+        pcm += c_pcm
+    return _pcm16_to_mp3(pcm, CARTESIA_SAMPLE_RATE), words
+
+
+def _heygen_stream(text):
+    """One HeyGen streaming request -> (pcm s16le mono, sample rate, words).
+
+    Server-sent events carry base64 WAV parts and `character_alignment` events whose
+    `original_characters` match the input text exactly."""
+    import base64
+    import io
+    import wave
+    body = {"model": MODEL_ID, "voice_id": VOICE_ID, "text": text, "language": "en",
+            "with_timestamps": True, "expressiveness_boost": HEYGEN_EXPRESSIVENESS}
+    headers = {"X-Api-Key": HEYGEN_API_KEY, "Content-Type": "application/json"}
+    r = _post_with_retry(HEYGEN_TTS_URL, body, headers, 'HeyGen')
+    pcm, rate, chars = b'', None, []
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith('data:'):
+            continue
+        payload = line[5:].strip()
+        if payload == '[DONE]':
+            break
+        ev = json.loads(payload)
+        if ev.get('type') == 'audio':
+            w = wave.open(io.BytesIO(base64.b64decode(ev['audio'])))
+            if w.getnchannels() != 1 or w.getsampwidth() != 2:
+                raise Exception("HeyGen returned non-mono/16-bit audio")
+            rate = w.getframerate()
+            pcm += w.readframes(w.getnframes())
+        elif ev.get('type') == 'character_alignment':
+            chars += ev['original_characters']
+        elif ev.get('type') == 'error' or 'error' in ev:
+            raise Exception(f"HeyGen stream error: {ev}")
+    if rate is None:
+        raise Exception("HeyGen stream returned no audio")
+    if ''.join(c['text'] for c in chars) != text:
+        raise Exception("HeyGen alignment text does not match the narration")
+    words = words_from_alignment([c['text'] for c in chars],
+                                 [c['start_time'] for c in chars],
+                                 [c['end_time'] for c in chars])
+    return pcm, rate, words
+
+
+def call_heygen_api(text):
+    """HeyGen Voice synthesis with word timestamps -> (mp3 bytes, words)."""
+    if not HEYGEN_API_KEY:
+        raise ValueError("HEYGEN_API_KEY not found in environment variables")
+    pcm, rate, words = b'', None, []
+    for chunk in _sentence_chunks(text, HEYGEN_MAX_CHARS, 'HeyGen'):
+        c_pcm, rate, c_words = _heygen_stream(chunk.strip())
+        offset = len(pcm) / 2 / rate
+        words += [{'word': w['word'], 'start': round(w['start'] + offset, 3),
+                   'end': round(w['end'] + offset, 3)} for w in c_words]
+        pcm += c_pcm
+    return _pcm16_to_mp3(pcm, rate), words
+
+
 def save_timestamps(output_dir: str, frame_number: int, text: str, words: List[Dict]) -> None:
     """Persist word timestamps next to the frame audio for downstream consumers."""
     path = os.path.join(output_dir, f"frame_{frame_number}_timestamps.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump({
-            'source': 'elevenlabs',
+            'source': PROVIDER,
             'text': text,
             'words': words,
         }, f, indent=2, ensure_ascii=False)
@@ -282,6 +522,35 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
 
     # Create audio directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
+
+    # One video = one narrator. A video already part-voiced finishes in its recorded voice
+    # (audio/tts_meta.json; no meta = voiced by ElevenLabs before metas existed) unless a
+    # provider/voice was requested explicitly — then a mismatch is refused, never mixed.
+    meta = read_tts_meta(output_dir)
+    have_audio = any(f.startswith('frame_') and f.endswith('.mp3') for f in os.listdir(output_dir))
+    if meta and not have_audio:
+        meta = None          # a meta with no audio yet pins nothing
+    if have_audio and not EXPLICIT_PROVIDER:
+        if meta and (meta.get('provider', 'elevenlabs'), meta.get('voice_id'),
+                     meta.get('model_id')) != (PROVIDER, VOICE_ID, MODEL_ID):
+            apply_tts_meta(meta)
+            print(f"  [tts_meta] finishing in the recorded voice ({PROVIDER} {VOICE_ID} / {MODEL_ID})")
+        elif not meta and PROVIDER != 'elevenlabs':
+            activate_provider('elevenlabs')
+            print(f"  [tts_meta] audio without {TTS_META} — finishing in ElevenLabs")
+    cur = current_tts_meta()
+    if meta and (meta.get('provider', 'elevenlabs'), meta.get('voice_id'),
+                 meta.get('model_id')) != (cur['provider'], cur['voice_id'], cur['model_id']):
+        raise SystemExit(f"✗ {output_dir} was voiced with {meta.get('provider', 'elevenlabs')} "
+                         f"{meta.get('voice_id')} / {meta.get('model_id')}; this run is "
+                         f"{cur['provider']} {cur['voice_id']} / {cur['model_id']}. "
+                         f"Move audio/ aside to re-voice the whole video.")
+    if not meta and have_audio and PROVIDER != 'elevenlabs':
+        raise SystemExit(f"✗ {output_dir} already holds audio from before {TTS_META} (ElevenLabs). "
+                         f"Move audio/ aside to re-voice the whole video in {PROVIDER}.")
+    if not meta and not have_audio:
+        Path(output_dir, TTS_META).write_text(json.dumps(cur, indent=2) + "\n")
+    check_provider_config()
 
     for frame in frames:
         frame_filename = f"frame_{frame.number}.mp3"
@@ -381,7 +650,7 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
 def print_report(results):
     """Print final generation report"""
     print("\n" + "=" * 60)
-    print("TTS Generation Complete (ElevenLabs)")
+    print(f"TTS Generation Complete ({PROVIDER})")
     print("=" * 60)
     print()
 
@@ -444,31 +713,39 @@ def format_time(seconds):
 def main():
     """Main execution function"""
     if len(sys.argv) < 2:
-        print("Usage: python generate_tts_elevenlabs.py <path_to_script> [--voice-id VOICE_ID]")
+        print("Usage: python generate_tts_elevenlabs.py <path_to_script> "
+              "[--profile elevenlabs|cartesia|heygen] [--voice-id VOICE_ID]")
         print()
         print("Example:")
         print("  python generate_tts_elevenlabs.py Week-1/Video-1/script.json")
         print()
         print("Options:")
-        print("  --voice-id   override the ELEVENLABS_VOICE_ID from .env")
+        print("  --profile    TTS provider (default: elevenlabs, or TTS_PROVIDER)")
+        print("  --voice-id   override the active provider's voice from .env")
         sys.exit(1)
 
-    global VOICE_ID
+    global VOICE_ID, EXPLICIT_PROVIDER
 
     script_path = sys.argv[1]
 
-    # Check for --voice-id override
+    if "--profile" in sys.argv:
+        idx = sys.argv.index("--profile")
+        activate_provider(sys.argv[idx + 1] if idx + 1 < len(sys.argv) else '')
+        EXPLICIT_PROVIDER = True
+
+    # Check for --voice-id override (a voice of the active provider)
     if "--voice-id" in sys.argv:
         idx = sys.argv.index("--voice-id")
         if idx + 1 < len(sys.argv):
             VOICE_ID = sys.argv[idx + 1]
+            EXPLICIT_PROVIDER = True
 
     # Determine output directory (same directory as script, in 'audio' subfolder)
     script_dir = os.path.dirname(script_path)
     audio_dir = os.path.join(script_dir, 'audio')
 
     print("=" * 60)
-    print("ElevenLabs TTS Audio Generator")
+    print(f"TTS Audio Generator ({PROVIDER})")
     print("=" * 60)
     print(f"Script: {script_path}")
     print(f"Output: {audio_dir}")
@@ -476,16 +753,10 @@ def main():
     print(f"Model: {MODEL_ID}")
     print("=" * 60)
 
-    # Verify API key and voice ID
-    if not ELEVENLABS_API_KEY:
-        print("\n✗ Error: ELEVENLABS_API_KEY not found in environment")
-        print("  Please check your .env file")
-        sys.exit(1)
-
-    if not VOICE_ID:
-        print("\n✗ Error: ELEVENLABS_VOICE_ID not found in environment")
-        print("  Please add ELEVENLABS_VOICE_ID=your_voice_id to your .env file")
-        sys.exit(1)
+    # Verify API key and voice ID (generate_audio_for_frames re-checks after adopting a
+    # part-voiced video's recorded provider)
+    if EXPLICIT_PROVIDER:
+        check_provider_config()
 
     try:
         # Parse script

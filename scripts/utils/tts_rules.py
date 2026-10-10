@@ -1,7 +1,7 @@
 """
 Canonical TTS narration rules for script-generation prompts.
 
-ElevenLabs reliably mangles certain token shapes (raw numerals, initialisms,
+TTS voices reliably mangle certain token shapes (raw numerals, initialisms,
 hex strings, code syntax). These rule blocks are injected verbatim into the
 math/technical script-generation prompts in generate_scripts.py — they are the
 ONLY place spoken text is shaped: every frame class's narration is voiced
@@ -9,12 +9,18 @@ verbatim from script.json (the verify_math `natural_narration` TTS rewrite was
 retired 2026-08-30). The post-hoc detection gate is scripts/utils/narration_check.py.
 
 When hardening a NEW recurring mispronunciation, update the relevant layer
-here AND the narration_check.py detector so prompts and the gate stay in sync.
+here AND the narration_check.py detector so prompts and the gate stay in sync. A single
+TOKEN the voice misreads (sinh, mu, CAPM) is an entry in the alias library
+(scripts/utils/tts_aliases.py) instead: one table feeds the prompt block rendered below,
+the gate, and the subtitle compactor that maps the alias back. There is no provider
+pronunciation dictionary — narration is voiced verbatim by any TTS provider.
 
 NOTE: these blocks are concatenated into prompt templates that later go
 through str.format() — keep literal braces escaped as {{ }} (currently there
-are none).
+are none; the alias block carries none either).
 """
+
+from scripts.utils.tts_aliases import alias_prompt_block
 
 # Injected into TECHNICAL_SCRIPT_GENERATION_PROMPT (spoken `narration` field
 # rules for technical subjects: hex strings, initialisms, code references,
@@ -249,12 +255,12 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      `AttributeError` mentioned inside a traceback → "A t t r i b u t e Error".
      Otherwise prefer the natural prose form.
 
-     Library / tool names that ElevenLabs mispronounces — do NOT respell them phonetically
+     Library / tool names that the voice mispronounces — do NOT respell them phonetically
      in narration: the spoken text is written VERBATIM into the subtitles, so "a too pull"
      ships on screen as nonsense. Reword AROUND the token instead ("the iterative version",
      "the while-loop version", "the NumPy library" is fine — the voice handles the name) and
-     let the on-screen code keep the real identifier; a stubborn token is fixed with a
-     pronunciation-dictionary alias (audio only, subtitles stay correct), never a respelling.
+     let the on-screen code keep the real identifier. A respelling is allowed ONLY when it is an
+     entry in the pronunciation-alias table below — the subtitles convert those back.
      Spoken conventions that ARE the notation's real spoken form are fine:
        - `numpy` → "num pie", `matplotlib` → "mat plot lib", `pyplot` → "pie plot",
          `pytest` → "pie test", `venv` → "vee env"
@@ -300,7 +306,8 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
 
      Code shown ON SCREEN keeps its literal syntax — these rewrite rules apply ONLY to
      the spoken `narration` field. The `visual` field can include fenced ```python
-     blocks with the actual code, indentation, and punctuation preserved verbatim."""
+     blocks with the actual code, indentation, and punctuation preserved verbatim.
+""" + alias_prompt_block(math=True)
 
 # Injected into MATH_SCRIPT_GENERATION_PROMPT (spoken `narration` field rules
 # for math videos). EVERY frame's narration — math, visual, code — is spoken
@@ -319,7 +326,8 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
          `174.00` → "one hundred seventy-four" (but significant digits stay: `1.1024`
          → "one point one zero two four"). The slide keeps the padded form on screen.
        - **Greek letters — write the name:** `α` → "alpha", `θ` → "theta", `π` → "pi",
-         `Δ` → "delta". Never put a raw Greek character in the narration.
+         `Δ` → "delta" (μ, ρ, χ take their alias: "mew", "roe", "kai"). Never put a raw
+         Greek character in the narration.
        - **Math symbols — write the words:** `√` → "the square root of", `∫` → "the
          integral of", `≤` / `≥` → "less than or equal to" / "greater than or equal
          to", `≠` → "not equal to", `×` → "times", `±` → "plus or minus", `∞` →
@@ -328,10 +336,8 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
          "dx", "du", "dy/dx" (TTS reads "dx" as a word, not two letters; "du" reads
          as the verb "do"). Partials: write "partial" for ∂ — "partial f over
          partial x". Second derivatives: "d squared y over d x squared".
-       - **Hyperbolic functions — write the phonetic form:** TTS treats the trailing
-         "h" as silent and reads them like the trig functions. "sinch" for sinh,
-         "tanch" for tanh, "koth" for coth, "sheck" for sech, "co-sheck" for csch;
-         "cosh" reads correctly as written. Inverses: "arc sinch", "arc tanch".
+       - **Hyperbolic functions, mu / rho / chi — write the alias** from the
+         pronunciation-alias table below ("sinch", "mew-hat", "kai-squared").
        - **Initialisms — space the letters** if you would say them letter-by-letter:
          `ODE` → "O D E", `IVP` → "I V P", `PDE` → "P D E", `RHS` → "R H S". Leave
          ones pronounced as words alone. Years spoken aloud follow the number rule:
@@ -373,6 +379,7 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
              `\tilde{{p}}` → "P-tilde". The hyphen also stops "A-hat" being misread as
              "uh hat".
          On-screen equations keep normal notation; only the spoken narration hyphenates.
+""" + alias_prompt_block(math=True) + """
    - **Never begin a sentence with the variable name "A"** — including the hyphenated
      forms above (`A-hat`, `A-X`, `A-one`). A sentence-initial "A" is read
      as the article "a" (uh) — "A is a matrix with ..." comes out "Uh is a matrix

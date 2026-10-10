@@ -29,8 +29,10 @@ compaction):
     -> λ₂), differentials ("d y over d x" -> dy/dx, "d squared y" -> d²y,
     "partial f" -> ∂f), letter subscripts ("X-zero" -> X₀,
     "epsilon-naught"/"v naught" -> ε₀/v₀), "squared"/"cubed"
-    -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/",
-    hyperbolic respellings ("sinch" -> sinh).
+    -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/".
+  - pronunciation aliases back to the written form (scripts/utils/tts_aliases.py): every
+    mode — "Oiler" -> Euler, "Tessaly" -> Thessaly, "cap-M" -> CAPM; math mode also —
+    "sinch" -> sinh, "mew-hat" -> μ̂, "vee" -> V.
   - era letters after a number/century: "B C" -> BC, "A D" -> AD; and "A D"
     BEFORE a year, the usual English order ("A D eighty-six" -> AD 86) — only
     outside math mode, and only when a digit year follows directly.
@@ -81,9 +83,13 @@ _GREEK_UPPER = {'gamma': 'Γ', 'delta': 'Δ', 'theta': 'Θ', 'lambda': 'Λ',
                 'xi': 'Ξ', 'pi': 'Π', 'sigma': 'Σ', 'phi': 'Φ',
                 'psi': 'Ψ', 'omega': 'Ω'}
 
-# Hyperbolic-function phonetic respellings (tts_rules.py) -> real notation.
-_WORD_MAP = {'sinch': 'sinh', 'tanch': 'tanh', 'koth': 'coth',
-             'sheck': 'sech', 'co-sheck': 'csch'}
+# Pronunciation aliases ("sinch", "mew", "Oiler", "cap-M") -> display form: the alias library
+# (scripts/utils/tts_aliases.py) is the single table shared with the prompts and the pre-TTS gate.
+from scripts.utils.tts_aliases import display_for as _alias_display  # noqa: E402
+
+# Function names are finished notation (the old hyperbolic word map marked them mathy); Greek
+# names and letters stay unmarked so _pass_math_tokens still turns "mu-one" into μ₁.
+_FUNCTION_DISPLAYS = {'sinh', 'cosh', 'tanh', 'coth', 'sech', 'csch'}
 
 # A subscript word after a letter or Greek name: the digit words plus "naught" ("epsilon-naught" ->
 # ε₀, "v naught" -> v₀; physics narration says "naught" ~5x as often as "zero"). "naught" is only
@@ -390,12 +396,16 @@ def _ordinal_suffix(v: int) -> str:
 # Passes
 # ---------------------------------------------------------------------------
 
-def _pass_word_map(toks: List[_Tok]) -> None:
-    for t in toks:
-        rep = _WORD_MAP.get(t.core.lower())
-        if rep:
+def _pass_aliases(toks: List[_Tok], math_mode: bool) -> None:
+    """Spoken pronunciation aliases back to their written form (runs FIRST, so the math passes
+    then see "mu-hat" / "sinh" exactly as if the script had written them)."""
+    for i, t in enumerate(toks):
+        nxt = toks[i + 1].core if i + 1 < len(toks) else ''
+        rep = _alias_display(t.core, math_mode, nxt)
+        if rep is not None:
+            if rep.lower() in _FUNCTION_DISPLAYS:
+                t.mathy = True
             t.core = rep
-            t.mathy = True
 
 
 def _pass_pow10(toks: List[_Tok]) -> None:
@@ -993,7 +1003,7 @@ def compact_words(words: List[Dict], math_mode: bool = False,
     words' time range. Timing of unchanged words is untouched.
     """
     toks = _make_toks(words)
-    _pass_word_map(toks)
+    _pass_aliases(toks, math_mode)
     _pass_pow10(toks)
     _pass_numbers(toks)
     _pass_decades(toks)

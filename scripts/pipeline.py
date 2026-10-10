@@ -969,8 +969,26 @@ def run_video_step(step: str, video_dir: Path, lecture_dir: Path,
                 print(f"\n{Colors.RED}{format_report(offenders, video_dir)}{Colors.RESET}")
                 return False
 
-        # No --voice-id: generate_tts_elevenlabs.py reads ELEVENLABS_VOICE_ID from .env
-        return run_script("generate_tts_elevenlabs.py", [str(script_path)])
+        # Provider: ElevenLabs by default; TTS_PROVIDER=cartesia|heygen|elevenlabs picks
+        # another (generate_tts_elevenlabs.py reads it and the voice from .env). One narrator per
+        # lecture: when the variable is unset and the lecture's other videos were all voiced by
+        # one provider (audio/tts_meta.json; no meta = ElevenLabs), this video uses it too.
+        args = [str(script_path)]
+        if not os.getenv("TTS_PROVIDER"):
+            def _voiced_provider(vdir):
+                if not any((vdir / "audio").glob("frame_*.mp3")):
+                    return None
+                try:
+                    return json.loads((vdir / "audio" / "tts_meta.json").read_text()).get(
+                        "provider", "elevenlabs")
+                except (OSError, json.JSONDecodeError):
+                    return "elevenlabs"
+            voiced = {_voiced_provider(v) for v in video_dir.parent.glob("Video-*")
+                      if v.is_dir() and v != video_dir}
+            voiced.discard(None)
+            if len(voiced) == 1 and voiced != {"elevenlabs"}:
+                args.extend(["--profile", voiced.pop()])
+        return run_script("generate_tts_elevenlabs.py", args)
 
     elif step == "animate":
         # Skip if no math verification data

@@ -4,7 +4,7 @@
 
 Produces educational videos from source/reference material (YouTube URL, raw
 video/audio, PDF book chapter, PPTX deck) — animated Manim visuals, ElevenLabs
-narration, word-accurate subtitles. Content is transcribed, cleaned, and
+(or Cartesia / HeyGen) narration, word-accurate subtitles. Content is transcribed, cleaned, and
 reorganized into self-contained concept videos; the script is written from the
 cleaned source and verified against it.
 
@@ -34,8 +34,8 @@ ludium_video/
 ├── scripts/                   # Pipeline scripts
 ├── templates/                 # Manim system prompt, teaching style guide, folio director/scene prompts
 ├── remotion/                  # Folio render harness (src/folio.tsx, fonts, paper textures)
-├── docs/                      # ElevenLabs pronunciation dictionary reference
-└── .env                       # ElevenLabs credentials (NEVER commit)
+├── docs/                      # walkthroughs and examples
+└── .env                       # API keys (NEVER commit)
 ```
 
 ## Common Workflows
@@ -266,10 +266,30 @@ generated if TTS-unfriendly tokens survive in the spoken narration — raw
 numerals, Greek letters, math symbols, hex strings, unspaced differentials,
 unhyphenated Greek-letter compounds (`delta X` must be `delta-X`, or the voice
 drops dead air between the tokens), bare initialisms, code tokens, the
-lowercase variable `a`, sentences starting with the name `A`. `scripts/utils/narration_check.py` scans the same source TTS
+lowercase variable `a`, sentences starting with the name `A`, and a written form the alias
+library respells (`alias`: sinh → "sinch", mu-hat → "mew-hat", CAPM → "cap-M"; math-scope
+entries only in Manim scripts). `scripts/utils/narration_check.py` scans the same source TTS
 reads and reports offenders by category; it detects only, never rewrites. Fix
 each token in the named source and resume `--from tts`; bypass a confirmed
 false positive with `SKIP_NARRATION_CHECK=1`.
+
+### TTS providers and pronunciation aliases
+
+`generate_tts_elevenlabs.py` voices narration VERBATIM with ElevenLabs by default, or with
+Cartesia (`--profile cartesia`: SSE endpoint, word timestamps on the narration's own tokens) or
+HeyGen (`--profile heygen`: streaming endpoint with timestamps); `TTS_PROVIDER` sets the
+default for every run. Each provider reads its key and voice from `.env` and returns the same
+mp3 + word-timestamp shape, so animate, subtitles and folio need no changes.
+`audio/tts_meta.json` records provider/voice/model: a resumed video finishes in that narrator,
+`pipeline.py` keeps one narrator per lecture, and `fix_tts_sentence.py` re-voices sentences in
+the recorded voice (no meta = ElevenLabs).
+
+There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
+NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for
+CAPM); one table feeds the script prompts, the pre-TTS gate (`alias`) and the subtitle
+compactor, which maps the alias back. Keep it small: add an entry only for a recurring
+mispronunciation actually heard, with a spoken form that is never ordinary English ("pie" for
+pi fails: "the size of the pie"). Self-test: `python -m scripts.utils.tts_aliases --self-test`.
 
 ### Generating Subtitles
 
@@ -302,8 +322,7 @@ fallback transcription — compile and subtitle must run serially.
 | `segment_concepts.py` | Materialize segmentation: `--apply RESPONSE.json` or `--single-video` |
 | `generate_scripts.py` | Script prompt templates (math/technical/folio) + argument-map helpers |
 | `verify_math.py` | SymPy helpers for math verification |
-| `setup_pronunciation_dict.py` | One-time: upload the bundled pronunciation dictionary, wire its ID into .env |
-| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps (applies the pronunciation dictionary) |
+| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps — ElevenLabs (default), `--profile cartesia` / `heygen` |
 | `fix_tts_sentence.py` | Zero-shift sentence-swap TTS fix (edit source → run → recompile) |
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
@@ -318,6 +337,7 @@ fallback transcription — compile and subtitle must run serially.
 | `utils/narration_check.py` | Pre-TTS gate: detects TTS-unsafe tokens in spoken narration |
 | `utils/manim_probe.py` | Shared Manim probes: scroll sim, width, Tex compile, glyph parity (`--self-test`) |
 | `utils/tts_rules.py` | Canonical TTS spell-out rule blocks injected into script prompts |
+| `utils/tts_aliases.py` | Pronunciation alias library: prompt table, pre-TTS gate, subtitle compaction (`--self-test`) |
 | `utils/verify_prompts.py` | verify_math / verify_code / color_plan prompt constants |
 | `utils/stt.py` | ElevenLabs Scribe transcription (all sources) |
 | `utils/script_parser.py` | script.json/script.md load/save |
@@ -328,8 +348,9 @@ fallback transcription — compile and subtitle must run serially.
 ```env
 ELEVENLABS_API_KEY=sk_...         # needs text_to_speech AND speech_to_text enabled
 ELEVENLABS_VOICE_ID=...           # narrator voice
-ELEVENLABS_PRONUNCIATION_DICT_ID= # set by scripts/setup_pronunciation_dict.py (bundled
-                                  # math dictionary; extend it for your own content)
+# Optional providers (--profile cartesia|heygen, or TTS_PROVIDER for every run):
+CARTESIA_API_KEY= / CARTESIA_VOICE_ID= / CARTESIA_TTS_MODEL=sonic-3.6
+HEYGEN_API_KEY= / HEYGEN_VOICE_ID=
 ```
 
 No other keys for math/technical. LLM steps run as Claude Code subagents under your subscription.

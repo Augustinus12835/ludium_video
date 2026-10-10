@@ -8,8 +8,8 @@ driven end to end from [Claude Code](https://claude.com/claude-code):
 - **Humanities** (history, philosophy, literature): ~20-minute documentary
   episodes in the look of an illustrated book of engravings (**folio** mode).
 
-Narration is synthesized with ElevenLabs, and animations and subtitles sync to
-it word by word.
+Narration is synthesized with ElevenLabs (or, optionally, Cartesia or HeyGen), and
+animations and subtitles sync to it word by word.
 
 ## See it
 
@@ -44,8 +44,8 @@ You need a **Claude subscription** (Pro or Max) and an **ElevenLabs account**.
 3. **Install the project:** run `claude` and paste
    `Set up https://github.com/Augustinus12835/ludium_video for me: clone it and install its dependencies.`
 4. **Add your keys:** in the `ludium_video` folder, `cp .env.example .env`, fill in
-   `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`, then run
-   `venv/bin/python scripts/setup_pronunciation_dict.py`.
+   `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID`. (To narrate with Cartesia or HeyGen
+   instead, also fill in their key and voice — see `.env.example`.)
 5. **Make a video:** inside the folder, run `claude` and type
 
 ```

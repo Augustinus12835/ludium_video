@@ -25,6 +25,7 @@ from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from scripts.utils.tts_aliases import alias_prompt_block
 from scripts.utils.tts_rules import (
     ERA_MARKER_RULES,
     TECHNICAL_NARRATION_TTS_RULES,
@@ -345,7 +346,8 @@ _SPOKEN_RULES_DOC = """SPOKEN-TEXT RULES (TTS — the narration is read aloud by
      "5th century" → "fifth century"; "1/3" → "one third".
 """ + ERA_MARKER_RULES + """
    - No symbols (%, &, $, °, etc.) — write the word. Expand abbreviations ("vs." → "versus", "e.g." → "for example").
-   - No Unicode Greek letters — write the English word. Spell out or naturalize anything that would be mis-read; the spoken line must be pure pronounceable English."""
+   - No Unicode Greek letters — write the English word. Spell out or naturalize anything that would be mis-read; the spoken line must be pure pronounceable English.
+""" + alias_prompt_block(math=False)
 
 _TITLE_META = """TITLE AND METADATA:
 - "title": an original title that states the thesis — not the working title.
