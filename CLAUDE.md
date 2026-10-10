@@ -22,8 +22,10 @@ LLM step (clean, segment, script, verify_math, color_scheme, color_plan, manim c
 `scripts/pipeline.py` runs the deterministic steps (transcribe, tts,
 animate-render of pre-authored sources, compile, subtitle) and halts with the
 exact `render_step_prompt.py` command when it reaches a subagent-authored step.
-The only paid external service the math/technical pipeline uses is ElevenLabs (TTS + Scribe
-transcription); the folio (humanities) pipeline adds image generation (see "Folio").
+The only paid external service the math/technical pipeline needs is ONE TTS provider —
+ElevenLabs, Cartesia or HeyGen (`TTS_PROVIDER`). ElevenLabs Scribe is optional, used only to
+transcribe an audio/video file or a caption-less YouTube video; the folio (humanities) pipeline
+adds image generation (see "Folio").
 
 ## Project Structure
 
@@ -275,10 +277,10 @@ false positive with `SKIP_NARRATION_CHECK=1`.
 
 ### TTS providers and pronunciation aliases
 
-`generate_tts_elevenlabs.py` voices narration VERBATIM with ElevenLabs by default, or with
-Cartesia (`--profile cartesia`: SSE endpoint, word timestamps on the narration's own tokens) or
-HeyGen (`--profile heygen`: streaming endpoint with timestamps); `TTS_PROVIDER` sets the
-default for every run. Each provider reads its key and voice from `.env` and returns the same
+`generate_tts_elevenlabs.py` voices narration VERBATIM with the provider chosen by
+`TTS_PROVIDER` in `.env` — `elevenlabs` (the fallback when unset), `cartesia` (SSE endpoint,
+word timestamps on the narration's own tokens) or `heygen` (streaming endpoint with
+timestamps); `--profile <provider>` overrides it for one run. Each provider reads its key and voice from `.env` and returns the same
 mp3 + word-timestamp shape, so animate, subtitles and folio need no changes.
 `audio/tts_meta.json` records provider/voice/model: a resumed video finishes in that narrator,
 `pipeline.py` keeps one narrator per lecture, and `fix_tts_sentence.py` re-voices sentences in
@@ -339,18 +341,19 @@ fallback transcription — compile and subtitle must run serially.
 | `utils/tts_rules.py` | Canonical TTS spell-out rule blocks injected into script prompts |
 | `utils/tts_aliases.py` | Pronunciation alias library: prompt table, pre-TTS gate, subtitle compaction (`--self-test`) |
 | `utils/verify_prompts.py` | verify_math / verify_code / color_plan prompt constants |
-| `utils/stt.py` | ElevenLabs Scribe transcription (all sources) |
+| `utils/stt.py` | ElevenLabs Scribe transcription (optional: audio/video files and caption-less YouTube) |
 | `utils/script_parser.py` | script.json/script.md load/save |
 | `utils/ffmpeg_compile.py` | Segment-wise ffmpeg encode + concat demuxer (bounded memory; used by `folio.py compile`) |
 
 ## API Keys (.env)
 
 ```env
-ELEVENLABS_API_KEY=sk_...         # needs text_to_speech AND speech_to_text enabled
-ELEVENLABS_VOICE_ID=...           # narrator voice
-# Optional providers (--profile cartesia|heygen, or TTS_PROVIDER for every run):
+TTS_PROVIDER=elevenlabs           # elevenlabs | cartesia | heygen — fill in THAT provider's key + voice:
+ELEVENLABS_API_KEY= / ELEVENLABS_VOICE_ID=      # key needs text_to_speech
 CARTESIA_API_KEY= / CARTESIA_VOICE_ID= / CARTESIA_TTS_MODEL=sonic-3.6
 HEYGEN_API_KEY= / HEYGEN_VOICE_ID=
+# Optional transcription (audio/video files, caption-less YouTube): ELEVENLABS_API_KEY with
+# speech_to_text (Scribe), whichever TTS provider; without it local files use Whisper.
 ```
 
 No other keys for math/technical. LLM steps run as Claude Code subagents under your subscription.

@@ -15,7 +15,8 @@ verification, colour scheme/plan, frame codegen. `render_step_prompt.py` renders
 prompt each step needs; the subagent works from that plus what a blind API call lacks
 (codegen gets a render→look→fix loop, math verification runs SymPy itself). `pipeline.py` is
 called only for deterministic slices (`--from X --to Y`: transcribe, tts, animate-render,
-compile, subtitle). The only paid external calls are ElevenLabs (TTS + Scribe) — plus, in folio
+compile, subtitle). The only paid external calls are the TTS provider (`TTS_PROVIDER`: ElevenLabs,
+Cartesia or HeyGen) and, only for audio/video sources without captions, ElevenLabs Scribe — plus, in folio
 (humanities) runs only, image generation (OpenAI gpt-image, Gemini for maps). Use your most
 capable available model for every subagent, and pass it explicitly rather than relying on
 inheritance.
@@ -59,7 +60,8 @@ humanities (history, philosophy, literature, religion) — a narration-first doc
 Remotion "book of plates" visual track, from lectures or books like any other mode
 (references/sources.md "Humanities sources"). One is required — there is no default mode.
 
-**Voice.** Narration uses `ELEVENLABS_VOICE_ID` from `.env` — pass no `--voice-id`.
+**Voice.** Narration uses the provider and voice set in `.env` (`TTS_PROVIDER` + that
+provider's `*_VOICE_ID`) — pass no `--voice-id`/`--profile`.
 
 ## How it runs
 

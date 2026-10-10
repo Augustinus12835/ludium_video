@@ -7,7 +7,7 @@ transcription and cleaning; Phase A starts at segment.
 ## YouTube URL
 
 Pass the URL straight to the pipeline — it fetches captions when available, otherwise
-downloads the audio with yt-dlp and transcribes with ElevenLabs Scribe:
+downloads the audio with yt-dlp and transcribes with ElevenLabs Scribe (needs `ELEVENLABS_API_KEY` with speech_to_text, whichever TTS provider narrates):
 
 ```bash
 venv/bin/python scripts/pipeline.py run "https://www.youtube.com/watch?v=..." --from transcribe --to transcribe --no-review [--math|--technical]

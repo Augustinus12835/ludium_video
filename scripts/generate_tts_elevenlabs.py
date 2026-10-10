@@ -7,12 +7,12 @@ Generates one MP3 per frame from the script's flat narration text, spoken verbat
 Word-level timestamps come back with each synthesis and are saved next to the audio
 (audio/frame_N_timestamps.json) for downstream steps (animate, subtitles).
 
-Providers (all return the same mp3 + word-timestamp shape, so nothing downstream branches):
-  elevenlabs  default — ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID (override per run: --voice-id)
-  cartesia    --profile cartesia  — CARTESIA_API_KEY + CARTESIA_VOICE_ID (CARTESIA_TTS_MODEL,
-              default sonic-3.6)
-  heygen      --profile heygen    — HEYGEN_API_KEY + HEYGEN_VOICE_ID
-TTS_PROVIDER=cartesia|heygen|elevenlabs sets the default for every run instead.
+Providers — choose one with TTS_PROVIDER=elevenlabs|cartesia|heygen in .env (unset = elevenlabs);
+all return the same mp3 + word-timestamp shape, so nothing downstream branches:
+  elevenlabs  ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID (override per run: --voice-id)
+  cartesia    CARTESIA_API_KEY + CARTESIA_VOICE_ID (CARTESIA_TTS_MODEL, default sonic-3.6)
+  heygen      HEYGEN_API_KEY + HEYGEN_VOICE_ID
+`--profile <provider>` overrides TTS_PROVIDER for one run.
 
 There is no provider pronunciation dictionary: narration is voiced VERBATIM, and a token voices
 misread is respelled in the narration itself from the alias library
@@ -109,7 +109,9 @@ def check_provider_config() -> None:
     """Exit with a clear message if the active provider's key or voice is missing."""
     key_var, voice_var = PROVIDERS[PROVIDER]
     if not os.getenv(key_var):
-        raise SystemExit(f"✗ {PROVIDER} TTS needs {key_var} in .env")
+        hint = ("" if os.getenv('TTS_PROVIDER') else
+                " — or pick another provider: TTS_PROVIDER=elevenlabs|cartesia|heygen")
+        raise SystemExit(f"✗ {PROVIDER} TTS needs {key_var} in .env{hint}")
     if not VOICE_ID:
         raise SystemExit(f"✗ {PROVIDER} TTS needs {voice_var} in .env (the voice to narrate in)")
 
