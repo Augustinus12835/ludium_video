@@ -70,21 +70,27 @@ except Exception:  # noqa: BLE001
 
 REMOTION = REPO / "remotion"
 FPS = 30
-FLASH = "gemini-3.1-flash-lite-image"
 PRO = "gemini-3-pro-image"
-# Escalation ladder for stubborn assets: the default model, one reroll on it, then a
-# stronger model. Maps stay on grounded Gemini Pro.
-TIERS = {"lite": FLASH, "flash": "gemini-3.1-flash-image", "pro": PRO,
-         "gpt": os.getenv("FOLIO_GPT_MODEL", "gpt-image-2.5-sunburst")}
-LADDER = ["lite", "flash", "gpt"]
-# Default rung for folio assets: OpenAI gpt-image (in an A/B against Gemini flash-lite it
-# gave far more detail and instruction-following — correct counts, recognisable objects —
-# at ≈$0.04 a plate vs ≈$0.034). OpenAI rate-limits images per minute by account tier and a
-# call takes ~35–45 s; at 20 images/min `assets --jobs 12` runs at the ceiling (429s back
-# off automatically). FOLIO_DEFAULT_TIER=lite switches the default to Gemini flash-lite
-# (then only GOOGLE_CLOUD_API_KEY is needed).
-DEFAULT_TIER = os.getenv("FOLIO_DEFAULT_TIER", "gpt")
+# Plates, portraits and objects REQUIRE gpt-image-2.5 (API id gpt-image-2.5-sunburst): in an
+# A/B against Gemini flash-lite it gave far more detail and instruction-following — correct
+# counts, recognisable objects — and the house style holds across an episode, and it renders
+# the custom 4K canvas sizes below. There is no gpt-image-2 or Gemini fallback for them: a
+# plate drawn by another model drifts from the house style. OpenAI rate-limits images per
+# minute by account tier and a call takes ~35–45 s; at 20 images/min `assets --jobs 12` runs
+# at the ceiling (429s back off automatically). Maps stay on grounded Gemini 3 Pro.
+GPT_MODEL = "gpt-image-2.5-sunburst"
+TIERS = {"pro": PRO, "gpt": GPT_MODEL}
 GPT_SIZE = {"16:9": "1536x1024", "3:4": "1024x1536", "1:1": "1024x1024"}
+# Big canvases for camera-track plates. folio.json `"canvas": "4k"` (the director writes it
+# for every new episode; an asset may override with its own `canvas`, "2k" or "1080") makes
+# every PLATE and MAP a 3840×2160 image — gpt-image-2.5 at that size (≈$0.10/plate vs
+# ≈$0.04), Gemini 3 Pro maps at imageSize 4K — so <Plate camera> can travel into a detail and
+# stay sharp (lossless to 2×, still engraving-crisp at 2.5×, soft from ~3×). Overlay
+# coordinates stay in 1920×1080 image space whatever the canvas. Episodes without the field
+# keep 1920×1080 plates and their cache keys.
+CANVAS = {"2k": (2560, 1440), "4k": (3840, 2160)}
+# Camera zoom a plate holds before it looks soft: source px per screen px ≥ ~0.75.
+CANVAS_MAX_ZOOM = {"4k": 2.7, "2k": 1.8, None: 1.35}
 GEN_URL = "https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
 
 # Duotone every image is normalised to — the same ink and paper as folio.tsx PAL.
@@ -338,6 +344,8 @@ def asset_kind(folio: dict, a: dict) -> str:
 
 def asset_file(vd: Path, folio: dict, a: dict) -> Path:
     k = asset_kind(folio, a)
+    if k == "motion":   # pre-made video clip (scripts/folio_motion.py), played by <Motion>
+        return vd / ASSET_DIR / f"{a['id']}.mp4"
     return vd / ASSET_DIR / (f"{a['id']}.png" if k == "object" else f"{a['id']}.jpg")
 
 
@@ -352,7 +360,7 @@ def _api_key() -> str:
     return k
 
 
-def gpt_image(prompt: str, aspect: str, model: str, refs=(), retries=8) -> bytes:
+def gpt_image(prompt: str, aspect: str, model: str, refs=(), retries=8, size=None) -> bytes:
     """OpenAI gpt-image generation; with reference images it uses images.edit (same
     composition for a then-state, likeness for a cast member)."""
     from openai import OpenAI
@@ -364,13 +372,13 @@ def gpt_image(prompt: str, aspect: str, model: str, refs=(), retries=8) -> bytes
                 files = [open(r, "rb") for r in refs]
                 try:
                     r = client.images.edit(model=model, image=files, prompt=prompt,
-                                           size=GPT_SIZE.get(aspect, "1536x1024"), quality="high")
+                                           size=size or GPT_SIZE.get(aspect, "1536x1024"), quality="high")
                 finally:
                     for fh in files:
                         fh.close()
             else:
                 r = client.images.generate(model=model, prompt=prompt, n=1,
-                                           size=GPT_SIZE.get(aspect, "1536x1024"), quality="high")
+                                           size=size or GPT_SIZE.get(aspect, "1536x1024"), quality="high")
             b64 = r.data[0].b64_json
             if b64:
                 u = getattr(r, "usage", None)
@@ -391,25 +399,19 @@ def gpt_image(prompt: str, aspect: str, model: str, refs=(), retries=8) -> bytes
     raise RuntimeError(last)
 
 
-def make_image(prompt: str, aspect: str, tier: str, refs=(), grounding=False) -> bytes:
+def make_image(prompt: str, aspect: str, tier: str, refs=(), grounding=False, canvas=None) -> bytes:
     model = TIERS[tier]
     if tier == "gpt":
-        return gpt_image(prompt, aspect, model, refs)
-    return gemini_image(prompt, aspect, model, refs, grounding)
+        size = "x".join(map(str, CANVAS[canvas])) if canvas in CANVAS and aspect == "16:9" else None
+        return gpt_image(prompt, aspect, model, refs, size=size)
+    return gemini_image(prompt, aspect, model, refs, grounding, image_size="4K" if canvas == "4k" else "2K")
 
 
 def asset_tier(a: dict, kind: str) -> str:
-    if kind == "map":
-        return "pro"
-    return a.get("model", DEFAULT_TIER)
+    return "pro" if kind == "map" else "gpt"
 
 
-def next_tier(tier: str):
-    i = LADDER.index(tier) if tier in LADDER else 0
-    return LADDER[i + 1] if i + 1 < len(LADDER) else None
-
-
-def gemini_image(prompt: str, aspect: str, model: str, refs=(), grounding=False, retries=4) -> bytes:
+def gemini_image(prompt: str, aspect: str, model: str, refs=(), grounding=False, retries=4, image_size="2K") -> bytes:
     parts = []
     for r in refs:
         mime = "image/png" if str(r).endswith(".png") else "image/jpeg"
@@ -417,7 +419,7 @@ def gemini_image(prompt: str, aspect: str, model: str, refs=(), grounding=False,
     parts.append({"text": prompt})
     cfg = {"responseModalities": ["IMAGE", "TEXT"], "imageConfig": {"aspectRatio": aspect}}
     if model == PRO:
-        cfg["imageConfig"]["imageSize"] = "2K"
+        cfg["imageConfig"]["imageSize"] = image_size
     payload = {"contents": [{"parts": parts}], "generationConfig": cfg}
     if grounding:
         payload["tools"] = [{"google_search": {}}]
@@ -547,7 +549,7 @@ def framed_edges(L: np.ndarray, box: list) -> dict:
 FRAMED: set = set()  # plates whose model output was drawn inside a frame (reroll candidates)
 
 
-def finish_asset(raw: bytes, kind: str, out: Path, crop=None, trim=None):
+def finish_asset(raw: bytes, kind: str, out: Path, crop=None, trim=None, canvas=None):
     """Normalise a model output into the house duotone. Objects become RGBA ink
     cutouts cropped to their ink (or to `crop` — a base object's box, so a
     then-state lines up with its base exactly). Returns the crop box used."""
@@ -604,7 +606,7 @@ def finish_asset(raw: bytes, kind: str, out: Path, crop=None, trim=None):
     if kind == "portrait":
         im = cover(im, 900, 1200)
     else:
-        im = cover(im, 1920, 1080)
+        im = cover(im, *CANVAS.get(canvas, (1920, 1080)))
     im.save(out, quality=92)
     return crop if kind in ("plate", "map") else None
 
@@ -619,15 +621,30 @@ def base_crop(vd: Path, folio: dict, a: dict):
 
 def finish_and_record(vd: Path, folio: dict, a: dict, raw: bytes) -> None:
     kind = asset_kind(folio, a)
-    crop = finish_asset(raw, kind, asset_file(vd, folio, a), base_crop(vd, folio, a), a.get("trim"))
+    crop = finish_asset(raw, kind, asset_file(vd, folio, a), base_crop(vd, folio, a), a.get("trim"), asset_canvas(folio, a))
     cf = vd / ASSET_DIR / f"{a['id']}.crop.json"
     if crop:
         cf.write_text(json.dumps(crop))
 
 
+def asset_canvas(folio: dict, a: dict):
+    """Canvas of a plate/map: its own `canvas`, else its base's (a then-state cross-dissolves
+    in place over its base), else the episode's folio.json `canvas`. "1080" = the old size."""
+    if asset_kind(folio, a) not in ("plate", "map"):
+        return None
+    c = a.get("canvas")
+    if not c and a.get("of"):
+        base = next((x for x in folio["assets"] if x["id"] == a["of"]), None)
+        c = base.get("canvas") if base else None
+    c = c or folio.get("canvas")
+    return c if c in CANVAS else None
+
+
 def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     kind = asset_kind(folio, a)
     out = asset_file(vd, folio, a)
+    if kind == "motion":
+        return a["id"], ("ok (motion clip)" if out.exists() else "SKIP motion — build it with folio_motion.py")
     raw_dir = vd / ASSET_DIR / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     refs = []
@@ -648,7 +665,11 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     tier = asset_tier(a, kind)
     model = TIERS[tier]
     grounding = kind == "map"
-    key = json.dumps({"p": prompt, "m": model, "k": kind, "refs": [sha(r) for r in refs], "seed": a.get("seed", 0)}, sort_keys=True)
+    canvas = asset_canvas(folio, a)
+    kd = {"p": prompt, "m": model, "k": kind, "refs": [sha(r) for r in refs], "seed": a.get("seed", 0)}
+    if canvas:
+        kd["canvas"] = canvas   # only when set, so existing keys stay valid
+    key = json.dumps(kd, sort_keys=True)
     keyf = out.with_suffix(out.suffix + ".key")
     if out.exists() and keyf.exists() and keyf.read_text() == key and not force:
         return a["id"], "cached"
@@ -664,17 +685,12 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
         return a["id"], "library"
     t0 = time.time()
     note = ""
-    # Framed plates: reroll once on the same model with a full-bleed nudge, then
-    # climb the ladder (lite → flash → gpt) — never more than one retry per model.
+    # Framed plates: reroll once with a full-bleed nudge.
     plan = [(tier, prompt), (tier, prompt + FULL_BLEED_RETRY)]
-    up = next_tier(tier) if kind == "plate" and not a.get("of") else None
-    while up:
-        plan.append((up, prompt + FULL_BLEED_RETRY))
-        up = next_tier(up)
     used = tier
     for attempt, (t_, p) in enumerate(plan):
         try:
-            raw = make_image(p, a.get("aspect") or ASPECT[kind], t_, refs, grounding)
+            raw = make_image(p, a.get("aspect") or ASPECT[kind], t_, refs, grounding, canvas)
         except Exception as e:  # noqa: BLE001
             if attempt == 0:
                 return a["id"], f"FAIL {e}"
@@ -688,8 +704,6 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
             break
         note = f" (framed → retry {attempt + 1})"
     (vd / ASSET_DIR / f"{a['id']}.model").write_text(used)
-    if used != tier:
-        note += f" [escalated to {used}]"
     (vd / ASSET_DIR / f"{a['id']}.prompt.txt").write_text(prompt, encoding="utf-8")
     keyf.write_text(key)
     if lib is not None:
@@ -768,6 +782,8 @@ def cmd_grid(a) -> int:
     if im.getchannel("A").getextrema()[0] < 255:
         bg = Image.new("RGBA", im.size, tuple(int(v) for v in PAPER_RGB) + (255,))
         im = Image.alpha_composite(bg, im)
+    if asset_kind(folio, x) in ("plate", "map") and im.width > 1920:
+        im = im.resize((1920, round(1920 * im.height / im.width)), Image.LANCZOS)  # grid in image space
     d = ImageDraw.Draw(im)
     try:
         font = ImageFont.truetype(str(REMOTION / "public/fonts/Inter.ttf"), 18)
@@ -819,6 +835,9 @@ def cmd_audit(a) -> int:
             warns.append(f"asset {x['id']}: ALL-CAPS word {CAPS_RE.search(p).group(0)!r} in prompt — it will be lettered")
         if k == "map" and len(x.get("places", [])) > 8:
             warns.append(f"asset {x['id']}: {len(x['places'])} places — maps letter ≤ 8 legibly")
+    if f.get("canvas") not in CANVAS and not any(x.get("canvas") in CANVAS for x in assets):
+        warns.append('no "canvas": "4k" in folio.json — plates will be 1920×1080 and the <Plate camera> '
+                     'cannot move in close (new episodes: add it before `assets`)')
     cast_ids = {c.get("id") for c in f.get("cast", [])}
     for c in f.get("cast", []):
         if c.get("portrait") and c["portrait"] not in idset:
@@ -961,27 +980,6 @@ def cmd_assets(a) -> int:
     vd = vdir(a.video)
     folio = load_folio(vd)
     ids = set(x.strip() for x in a.only.split(",")) if a.only else None
-    if a.escalate:
-        # QA rule: the first fix is the SAME model with a corrected prompt; if the defect
-        # survives that reroll, --escalate moves the asset one rung up the ladder.
-        if not ids:
-            sys.exit("--escalate needs --only <ids>")
-        for x in folio["assets"]:
-            if x["id"] in ids:
-                k = asset_kind(folio, x)
-                if k == "map":
-                    print(f"  {x['id']}: maps stay on grounded Pro — fix the prompt/places instead")
-                    continue
-                mf = vd / ASSET_DIR / f"{x['id']}.model"
-                cur = mf.read_text().strip() if mf.exists() else asset_tier(x, k)
-                nxt = next_tier(cur)
-                if nxt is None:
-                    print(f"  {x['id']}: already on the top rung ({cur}) — rewrite the prompt or drop the asset")
-                    continue
-                x["model"] = nxt
-                print(f"  {x['id']}: {cur} → {nxt}")
-        save_folio(vd, folio)
-        a.force = True
     todo = [x for x in folio["assets"] if ids is None or x["id"] in ids]
     (vd / ASSET_DIR).mkdir(parents=True, exist_ok=True)
     # Waves: portraits and bases first, then anything that references them.
@@ -1107,6 +1105,7 @@ def bundle(vd: Path, folio: dict, tl: dict, idx: list, tag: str) -> Path:
 
 # ─────────────────────────────────────────────────────────────── lint (static)
 
+CAMERA_RE = re.compile(r"""<Plate\b[^>]*?\bsrc\s*=\s*['"]([\w\-]+)['"][^>]*?\bcamera\s*=\s*\{(\[.*?\])\s*\}(?=\s*(?:/?>|\w+\s*=))""", re.S)
 CUE_RE = re.compile(r"""\b(?:at|until|fillAt|strike)\s*[=:]\s*\{?\s*(['"])(.+?)\1""")
 CUEFN_RE = re.compile(r"""\bcue\(\s*(['"])(.+?)\1(\s*,\s*\{[^}]*n\s*:\s*(\d+))?""")
 
@@ -1157,6 +1156,17 @@ def lint_scene(vd, folio, tl, s) -> tuple:
             errs.append(f"cue not spoken in this scene: \"{phrase}\"" + (f" (n={n}, {cnt} found)" if n else ""))
         elif cnt > 1 and n is None:
             warns.append(f"cue \"{phrase}\" occurs {cnt}× in this scene — first used; pass cue(..., {{n}}) or a longer phrase")
+    amap = {x["id"]: x for x in folio["assets"]}
+    for m in CAMERA_RE.finditer(tsx):
+        a = amap.get(m.group(1))
+        if not a:
+            continue
+        cv = asset_canvas(folio, a)
+        lim = CANVAS_MAX_ZOOM.get(cv, CANVAS_MAX_ZOOM[None])
+        zs = [float(z) for z in re.findall(r"zoom\s*:\s*([\d.]+)", m.group(2))]
+        if zs and max(zs) > lim:
+            warns.append(f"camera zoom {max(zs):g} on '{a['id']}' ({cv or '1080'} canvas) — soft above ~{lim:g}"
+                         + ("; regenerate the plate at canvas 4k" if cv != "4k" else ""))
     for m in re.finditer(r"\b(?:y|top)\s*[=:]\s*\{?\s*(\d{3,4})", tsx):
         if int(m.group(1)) > 872:
             warns.append(f"y={m.group(1)} is inside the caption band (872–1006)")
@@ -1450,7 +1460,7 @@ def cmd_contact(a) -> int:
     tiles = []
     for x in folio["assets"]:
         p = asset_file(vd, folio, x)
-        if not p.exists():
+        if not p.exists() or p.suffix == ".mp4":
             continue
         im = Image.open(p).convert("RGBA")
         bg = Image.new("RGBA", im.size, tuple(int(v) for v in PAPER_RGB) + (255,))
@@ -1499,8 +1509,6 @@ def main() -> int:
     s.add_argument("--only")
     s.add_argument("--force", action="store_true")
     s.add_argument("--jobs", type=int, default=6)
-    s.add_argument("--escalate", action="store_true",
-                   help="move --only assets one model up the ladder (lite → flash → gpt) and regenerate")
     s = sub.add_parser("audit")
     s.add_argument("video")
     s = sub.add_parser("prompt")

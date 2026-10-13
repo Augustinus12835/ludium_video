@@ -15,11 +15,11 @@ render · compile · sheet · contact · status), `scripts/build_narration_timel
 `templates/folio_scene_prompt.md`.
 
 **Paid services beyond ElevenLabs.** Images: OpenAI `gpt-image` for plates, portraits, objects
-and then-states (`OPENAI_API_KEY`; model `gpt-image-2.5-sunburst` unless `FOLIO_GPT_MODEL` names another, e.g. `gpt-image-2`)
+and then-states (`OPENAI_API_KEY`; gpt-image-2.5, API id `gpt-image-2.5-sunburst`, is required —
+there is no fallback model, because a plate drawn by another model drifts from the house style)
 and Gemini 3 Pro Image with Google Search grounding for maps (`GOOGLE_CLOUD_API_KEY`). Budget
-roughly US$5–7 of images per 20-minute episode (≈120–200 assets at ≈$0.04, maps ≈$0.13).
-`FOLIO_DEFAULT_TIER=lite` moves every non-map asset to Gemini flash-lite (then only the Google
-key is needed).
+roughly US$10–12 of images per 20-minute episode (≈120–200 assets: 4K plates ≈$0.10,
+portraits/objects ≈$0.04, 4K maps ≈$0.24).
 
 **Setup once:** Node.js 18+, then `cd remotion && npm ci`.
 
@@ -126,6 +126,16 @@ by the folder prefix before the first `_` — the SAME portrait image in every e
 ```bash
 venv/bin/python scripts/folio.py assets pipeline/<L>/Video-N --jobs 12
 ```
+**Big canvases + camera.** `folio.json` carries `"canvas": "4k"` (the director writes it;
+`folio.py audit` warns when it is missing): every plate is generated at 3840×2160 on
+gpt-image-2.5 and every grounded map at Gemini Pro imageSize 4K, then kept at 3840×2160
+(then-states inherit their base's canvas). `<Plate camera={[…]}>` then tours the picture — a
+building part by part, shot / reverse-shot between two speakers, a reveal, a tableau read
+figure by figure — instead of labels and leader lines (scene prompt "the camera"). Detail
+holds to ~2.5× zoom; `folio.py lint` warns past what a plate's canvas holds. Coordinates
+(overlays, camera stops, `grid`) stay in 1920×1080 image space. A folio.json without
+`canvas` keeps 1920×1080 plates; `"canvas"` on one asset overrides.
+
 Every image is normalised to the house duotone; plates/maps are trimmed of platemarks; objects
 become RGBA ink cutouts (a then-state shares its base's crop). Post-processing changes never
 need new API calls: `folio.py refinish`. OpenAI rate-limits images per minute by account tier
@@ -142,13 +152,11 @@ scene; foreground subjects must be right), wrong likeness (a cast portrait must 
 editing the asset's `prompt` (positive wording — a negative paints its token) and
 `folio.py assets … --only <id> --force`. Two rounds max.
 
-**Stubborn assets climb the model ladder:** `lite` (gemini-3.1-flash-lite-image) → `flash`
-(gemini-3.1-flash-image) → `gpt`. Reroll ONCE on the current model with a corrected prompt; if
-the defect survives, `folio.py assets … --only <id> --escalate` moves it one rung up (records
-`"model"` in folio.json) and regenerates. Framed plates climb automatically (one full-bleed
-retry per rung). Image EDITS (`of` then-states) cannot reliably remove a figure or change a
-count — for those, drop `of` and generate a fresh image. Maps never escalate (grounding is
-Pro-only); fix their `places`/prompt instead. A manual `trim: [l, t, r, b]` (fractions of the
+**Stubborn assets:** reroll with a corrected prompt (`--only <id> --force`); plates, portraits
+and objects always stay on gpt-image-2.5. A plate drawn with a paper frame retries once
+automatically with a full-bleed nudge. Image EDITS (`of` then-states) cannot reliably remove a figure or change a
+count — for those, drop `of` and generate a fresh image. Maps are grounded Gemini Pro; fix
+their `places`/prompt instead. A manual `trim: [l, t, r, b]` (fractions of the
 raw) crops a stubborn paper margin.
 
 ## Stage 4 — scene authors (parallel subagents)
@@ -184,6 +192,87 @@ target, unreadable type, overcrowding, a static stretch, a fact on screen the na
 not support, an anachronism. Return `[{scene, severity, issue, fix}]`; route fixes back to the
 scene's author (SendMessage) or a fresh author with the scene prompt, tell authors to verify
 with stills only, then run ONE render yourself after they all report.
+
+## Stage 5b — motion plates (optional, off by default)
+
+**Skip this stage unless you want motion in this episode.** Gemini Omni Flash is still
+unstable and costs ~$1.10 per 10-second clip; a folio episode is finished at the stills pass +
+compile, with the camera (`<Plate camera>`) doing the moving.
+
+A few scenes become moving engraved plates: a Three.js blocking proxy (layout, camera, timing)
+is restyled by **Gemini Omni Flash** into the folio look, then plays where the `Plate` was
+(`<Motion>` in `remotion/src/folio.tsx`, asset kind `motion`). One CLI,
+`scripts/folio_motion.py` (cues · proxy · ref · gen · extend · fit · sheet); kit in
+`scripts/motion_proxy/` (`lib.js`: people with walk cycles, triremes, water, splash, theatre
+pieces; `cd scripts/motion_proxy && npm ci`; headless Chrome at `$CHROME` or
+`/usr/bin/google-chrome`); per-video work in `<video>/motion/`.
+
+**What to animate.** WIDE shots whose motion is generic and continuous and whose detail stays
+obscure: a whole army or fleet moving, crowds, rowing, climbing, work seen from afar, and
+camera moves through a place (a theatre crane worked very well). The motion runs on in the
+background under the narration. NEVER a close-up subject or a specific, delicate or
+choreographed action: building a wall up close, storming a fort, ramming and towing ships,
+overrunning a post or a sneak attack all failed in testing (impossible heads, morphing hands,
+invented cuts). Comparisons, definitions, concepts, portraits and maps stay still. Clips are
+made FOR the episode from its own plate; reuse one where a plate repeats or a later scene
+continues the shot.
+
+Per scene NN (the clip runs 10 s; `fit` stretches it ≤1.25×, ≥0.9×, to the scene):
+
+```bash
+V=pipeline/<L>/Video-1
+venv/bin/python scripts/folio_motion.py cues  $V NN          # word cues in clip time
+#   write $V/motion/scene_NN.js (Three.js, imports '../lib.js'): WIDE, many small figures,
+#   gentle camera; continuity over beats; designed wide even when the plate is a close-up
+venv/bin/python scripts/folio_motion.py proxy $V NN --test 0,3,6,9.5   # Read motion/scene_NN.test.jpg; ≤2 iterations
+venv/bin/python scripts/folio_motion.py proxy $V NN
+#   optional motion/scene_NN.ref.txt (period details, "seen from far away, small figures")
+venv/bin/python scripts/folio_motion.py ref   $V NN --at 5   # gpt-image-2.5 redraws a proxy frame in the plate's style
+#   write motion/scene_NN.prompt.txt (template below)
+venv/bin/python scripts/folio_motion.py gen   $V NN          # Omni edit: proxy + ref + plate, ~$1.10, ~65 s
+venv/bin/python scripts/folio_motion.py sheet $V NN          # Read it; re-gen ONCE if it cuts, morphs or ignores the blocking
+venv/bin/python scripts/folio_motion.py extend $V NN         # only scenes > ~12.5 s: continue to scene/1.25 (~$0.10/s)
+venv/bin/python scripts/folio_motion.py fit   $V NN [--crop W:H:X:Y] [--plate ID]
+```
+
+Prompt template (motion/scene_NN.prompt.txt): "Restyle this video completely as a living
+sepia steel-engraving in exactly the style of the reference images: <IMAGE_REF_0> is this
+shot redrawn, <IMAGE_REF_1> is the film's plate … Keep the camera move, the composition,
+every figure's position and the timing exactly as in the input video; use it only as a guide
+for layout and motion and do not show its blocky shapes. One continuous unbroken shot; wide,
+distant view, small figures, no close-ups." Then the actors and the motion in order, then
+"No text, lettering, signature, title or caption anywhere in the picture; no new people, no
+cuts. No dialogue, no music."
+
+Then swap the scene's `<Plate src="X" …>` for `<Motion src="m_X" …>` (keep `wash`, `until`,
+`box`, children; `zoom` for a cue-driven push-in; `style` passes through), back the old TSX up
+to `motion/scene_NN.tsx.pre_motion`, `folio.py lint`, `render --only …`, check stills, compile.
+Parallelise with one subagent per 4–6 scenes: they run cues → gen → sheet and report the take
+and crop. Only the orchestrator runs `fit` (it writes folio.json) and edits TSX.
+
+Motion pitfalls:
+- **Omni often frames the clip as a printed page**, with a cream margin and sometimes a fake
+  engraved signature or caption at bottom right. A negative prompt does not stop it. Look at a
+  late frame's edges and pass `fit --crop W:H:X:Y` (keep 16:9; crop the lettering off from the
+  top). `ffmpeg delogo` smears visibly; don't use it.
+- **Overlays traced on the still plate** (`Draw` lines, `Tag` `to=` arrows) misalign once the
+  camera moves. Re-aim them from a gridded clip frame
+  (`ffmpeg … -vf crop=…,scale=960:540,drawgrid=w=96:h=54`) or drop the arrow and keep the label.
+- **A `then=` sequence** (intact → burning → burnt) is usually what the clip itself shows: drop
+  it. Keep a dissolve to a different plate as a separate `Plate at=… fade=…` over a
+  `Motion until=…`.
+- **`plate_of` takes the scene's FIRST `<Plate>`.** When a map comes first, pass `fit --plate`.
+  A plate reused by another scene gets the asset id `m_<plate>_sNN`.
+- **`enter: "cut"` continuity**: when the next scene continues the same plate, give it the
+  clip's continuation (an `extend` beyond the scene, trimmed) so the shot runs on across the
+  cut instead of jumping back to the still.
+- **Extend** continues the previous interaction (`previous_interaction_id`). Never set `task`
+  on that follow-up turn (HTTP 400). It returns the whole longer video, billed only for the
+  new seconds.
+- A short scene (< 9 s) uses only the clip's first seconds (never faster than 0.9×): put the
+  action early in the proxy.
+- A motion clip and a camera track don't mix: a `<Motion>` replaces the plate, so drop the
+  scene's `camera` (use `<Motion zoom>` for a push-in).
 
 ## Stage 6 — compile, subtitles
 

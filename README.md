@@ -79,10 +79,12 @@ Folio also generates images, so it needs two more keys in `.env`:
 
 | Key | Used for |
 |---|---|
-| `OPENAI_API_KEY` | engraved plates, portraits and objects (`gpt-image-2.5-sunburst`; set `FOLIO_GPT_MODEL=gpt-image-2` if your account lacks it) |
-| `GOOGLE_CLOUD_API_KEY` | maps (Gemini with Google Search grounding) |
+| `OPENAI_API_KEY` | engraved plates, portraits and objects — requires `gpt-image-2.5-sunburst` (gpt-image-2.5); there is no fallback model |
+| `GOOGLE_CLOUD_API_KEY` | maps (Gemini with Google Search grounding); optional motion plates (Gemini Omni Flash) |
 
-Images cost roughly **US$5–7 per 20-minute episode**. Rendering uses
+Plates are 4K canvases (3840×2160) that a camera travels over, and images cost roughly
+**US$10–12 per 20-minute episode**. Moving plates (`scripts/folio_motion.py`) are optional
+and off by default (~US$1.10 per 10-second clip). Rendering uses
 [Remotion](https://www.remotion.dev): install Node.js 18+, then
 `cd remotion && npm ci`. A book can be divided into episodes with a manifest;
 `docs/examples/plato_republic_episodes.json` is a worked example.

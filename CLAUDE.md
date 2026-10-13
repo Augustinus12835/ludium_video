@@ -145,12 +145,23 @@ Narration-first documentary with a Remotion "book of plates" visual track. Playb
   filler, cadence and movement shape; `--argument` checks the map alone.
 - **Visual track (after TTS):** `build_narration_timeline.py` → a director subagent writes
   `folio.json` (world, cast, 3–5 scenes/min on verbatim anchors, 6–10 generated assets/min,
-  an `off_screen` list) → `folio.py place` / `audit` → `folio.py assets` (OpenAI gpt-image;
+  an `off_screen` list, `"canvas": "4k"`) → `folio.py place` / `audit` → `folio.py assets` (gpt-image-2.5, required;
   maps on grounded Gemini Pro; every image normalised to one sepia duotone, objects become ink
   cutouts) → scene-author subagents write free-form `frames/scene_NN.tsx` against
   `remotion/src/folio.tsx` after LOOKING at the assets, iterating on `folio.py still --auto` →
   `folio.py lint` / `render` / `sheet` / `compile` → `generate_subtitles.py`. Captions are
   burned in, word by word, in a reserved band (y 872–1006).
+- **Plates are 4K canvases with a camera:** `"canvas": "4k"` makes every plate and map
+  3840×2160, and `<Plate camera={[{at, on, zoom, dur}]}>` travels the picture to whatever the
+  narration names (a building part by part, speaker ↔ listener cuts, reveals) instead of
+  labelling it. Coordinates stay in 1920×1080 image space; `folio.py lint` warns when a zoom
+  exceeds what the canvas holds.
+- **Motion plates (optional, off by default):** a WIDE scene with generic, continuous motion
+  (armies, fleets, crowds, work seen from afar, a camera move through a place — never
+  close-ups or choreographed action) can become a moving engraved plate: a Three.js proxy
+  (`scripts/motion_proxy/`) restyled by Gemini Omni Flash (~US$1.10 per 10 s), played by
+  `<Motion>`. `scripts/folio_motion.py`; playbook Stage 5b. Omni is still unstable, so run it
+  only when you want motion in an episode.
 - `pipeline.py … --folio` runs transcribe/clean/segment and TTS; its animate/compile steps
   halt with a pointer to the playbook. Setup: Node.js 18+, `cd remotion && npm ci`.
 
@@ -331,6 +342,7 @@ fallback transcription — compile and subtitle must run serially.
 | `compile_video.py` | Compile frames + audio into final_video.mp4 |
 | `build_narration_timeline.py` | Folio: stack per-frame word timestamps into one narration timeline |
 | `folio.py` | Folio: place · audit · assets · refinish · grid · contact · prompt · still · lint · render · sheet · compile · status |
+| `folio_motion.py` | Folio motion plates (optional): Three.js proxy → Gemini Omni Flash clip → `<Motion>` (cues · proxy · ref · gen · extend · fit · sheet; kit `scripts/motion_proxy/`) |
 | `obp_pdf_to_markdown.py` | Open-textbook PDF (text layer) → per-section markdown + footnotes + `sections.json` |
 | `generate_subtitles.py` | SRT subtitles from stored word timestamps (Scribe fallback) |
 | `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS; folio dossier checks; `--argument` (`--self-test`) |
@@ -358,9 +370,9 @@ HEYGEN_API_KEY= / HEYGEN_VOICE_ID=
 
 No other keys for math/technical. LLM steps run as Claude Code subagents under your subscription.
 
-Folio (humanities) only — image generation, roughly US$5–7 per 20-minute episode:
+Folio (humanities) only — image generation, roughly US$10–12 per 20-minute episode (4K plates):
 
 ```env
-OPENAI_API_KEY=...                # gpt-image plates, portraits, objects (FOLIO_GPT_MODEL, default gpt-image-2.5-sunburst; gpt-image-2 as fallback)
-GOOGLE_CLOUD_API_KEY=...          # Gemini: grounded maps (and every image with FOLIO_DEFAULT_TIER=lite)
+OPENAI_API_KEY=...                # plates, portraits, objects — requires gpt-image-2.5 (gpt-image-2.5-sunburst), no fallback
+GOOGLE_CLOUD_API_KEY=...          # Gemini: grounded maps; optional motion plates (Omni Flash)
 ```

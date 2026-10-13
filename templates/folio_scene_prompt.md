@@ -15,8 +15,10 @@ the word-synchronous captions, and the dissolve into/out of your scene. **Never 
 1. **Look at the assets first.** Read each image your scene uses
    (`<video>/assets/folio/<id>.jpg|png`). For any plate or map you will annotate, run
    `venv/bin/python scripts/folio.py grid <video> <asset_id>` and Read
-   `folio_build/grid_<id>.png` — a 100 px grid in the image's own 1920×1080 space. Read the
-   real coordinates of what you will point at; never guess where Athens is on a map.
+   `folio_build/grid_<id>.png` — a 100 px grid in the image's own 1920×1080 space (plates are
+   4K files, but every coordinate — overlays and camera stops alike — is in this 1920×1080
+   space). Read the real coordinates of what you will point at or frame; never guess where
+   Athens is on a map.
 2. **Write the scene** (`frames/scene_NN.tsx`).
 3. **Look at it**: `venv/bin/python scripts/folio.py still <video> --scene NN --auto` renders
    a still ~1 s after every cue plus the last frame → `folio_build/stills/`. Read every still.
@@ -64,7 +66,8 @@ calls "one reading" or disputed stays marked as such on screen. The **Off screen
 - **Continuity.** If the NEXT scene enters with `cut`, elements that don't carry over should
   leave with `until` ~0.5 s before your scene ends; elements that do carry over must sit in
   the same place in both files, and the next file re-declares them with `at={-1}`. A plate
-  that continues resumes its push where it stopped (e.g. `push={[1.05, 1.08]}`).
+  that continues resumes its push where it stopped (e.g. `push={[1.05, 1.08]}`); a camera
+  plate that continues starts its `camera` with the previous scene's last stop at `at: 0`.
 - Every scene should change something at least every ~4 s and must not be static for its
   whole span. Nothing moves gratuitously: no bouncing, spinning, sliding across the frame.
 
@@ -79,13 +82,37 @@ Hooks/helpers: `useT()`, `useCue()` → `cue(phrase, {n?, end?})`, `useAt(at)`, 
 
 Every component takes `at` (cue or seconds) and most take `until` (exit).
 
-- `<Plate src at? until? box? push? focus? wash? then? fit? fade?>{children}</Plate>` — an
+- `<Plate src at? until? box? push? focus? camera? wash? then? fit? fade?>{children}</Plate>` — an
   engraved plate, full-bleed by default (inside the frame), slow push-in (`push=[1,1.05]`).
   `box={{x,y,w,h}}` makes an inset plate (thin rule + shadow). `wash` = paper veil: a number
   or steps `[{at, to}]` — wash to ~0.55–0.75 whenever cards or type sit on it.
   `then=[{src, at}]` cross-dissolves to later states of the same composition.
   **Children are in the IMAGE's 1920×1080 pixel space** (read coordinates off the grid) and
   ride the push-in — pins, routes and tags that name things in the picture go here.
+- **`<Plate camera={[…stops]}>` — the camera.** Plates are 4K canvases; a camera track
+  replaces `push`/`focus` and travels the picture to what the narration names. Each stop
+  `{at, on: [x, y], zoom, dur?, drift?, arc?}`: from `at` (a cue) the camera MOVES over
+  `dur` s (default 1.8; `0` = a hard cut) to centre image point `on` at `zoom` (1 = whole
+  plate), then holds with a slow drift-in. The framed point sits a little above screen
+  centre, clear of the captions; edges clamp (the plate always fills the frame, so a figure on
+  the border lands off-centre). Long moves between two close-ups pull back mid-way.
+  ```tsx
+  <Plate src="early_theatre" camera={[
+    {at: 0, zoom: 1},                                                  // whole view
+    {at: 'somewhere for the audience to sit', on: [330, 600], zoom: 2.0},
+    {at: 'a level floor', on: [1060, 620], zoom: 1.6, dur: 2.2},
+    {at: 'stood the skene', on: [1590, 520], zoom: 2.3},
+  ]} />
+  ```
+  Patterns: a **tour** (whole → each part as named), **dialogue** (speaker, `dur: 0` cut to
+  the listener, back, then pull out to both), a **reveal** (open at zoom 2.5 on a detail,
+  pull out on the phrase that widens the view), **reading a tableau** figure by figure.
+  Craft: zoom ≤ 2.5 (lint warns past what the plate's resolution holds); hold each stop
+  ≥ ~2 s; pans 1.4–3 s; a stop on every named thing is plenty — the camera does not wander
+  between cues. Plate children zoom with the camera, so type that must stay a fixed size goes
+  OUTSIDE the Plate (screen space), and a label over a picture is usually unnecessary once
+  the camera is showing the thing. A camera move counts as the scene "changing". Check each
+  stop in its still: the thing named must be framed, not cut by the edge or the caption band.
 - `<Ink src x y w at? until? draw? then? rotate? backing?>` — an object cutout (transparent paper;
   `backing={0.9}` lays a soft paper glow behind it so a plate doesn't show through its pages),
   positioned by CENTRE; `draw` wipes it on like a pen; `then` cross-fades to later states

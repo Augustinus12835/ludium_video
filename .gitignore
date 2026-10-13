@@ -17,3 +17,6 @@ media/
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Three.js motion-proxy kit deps (npm install in scripts/motion_proxy)
+scripts/motion_proxy/node_modules/

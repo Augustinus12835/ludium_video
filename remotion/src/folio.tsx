@@ -17,7 +17,7 @@
  *    resolved against this scene's word timestamps) rather than hand-typed seconds.
  */
 import React, {createContext, useContext, useMemo} from 'react';
-import {AbsoluteFill, Img, staticFile, useCurrentFrame, useVideoConfig, Easing, interpolate} from 'remotion';
+import {AbsoluteFill, Img, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig, Easing, interpolate} from 'remotion';
 import {loadFont as loadLocalFont} from '@remotion/fonts';
 
 loadLocalFont({family: 'Bodoni Moda', url: staticFile('fonts/BodoniModa.ttf'), weight: '400 900'});
@@ -352,6 +352,46 @@ export const FolioStage: React.FC<{data: FolioData; scene: number; children: Rea
 type Box = {x: number; y: number; w: number; h: number};
 type WashStep = {at: At; to: number; dur?: number};
 type ImgState = {src: string; at: At; dur?: number};
+/**
+ * One stop of a Plate camera track. `on` is a point in IMAGE space (1920×1080, the same
+ * space as Plate children / `folio.py grid`) that the camera centres on; `zoom` is relative
+ * to the plate filling the box (1 = whole plate). The camera MOVES there starting at `at`
+ * over `dur` seconds (default 1.8; 0 = a hard cut, for shot / reverse-shot), then holds
+ * with a slow drift-in (`drift`, zoom gained per second, default 0.006).
+ */
+export type CamStop = {at: At; on?: [number, number]; zoom?: number; dur?: number; drift?: number; arc?: boolean};
+
+/** Where the camera stands at scene time t: centre (image space) + zoom. */
+const useCamera = (stops: CamStop[] | undefined, t: number) => {
+  const cue = useCue();
+  if (!stops || !stops.length) return null;
+  type S = {x: number; y: number; z: number};
+  const res = stops.map((s) => ({a: typeof s.at === 'number' ? s.at : cue(s.at), s}));
+  const target = (s: CamStop, prev?: S): S => ({x: s.on ? s.on[0] : prev ? prev.x : 960, y: s.on ? s.on[1] : prev ? prev.y : 540,
+    z: s.zoom ?? (s.on ? 1.8 : 1)});
+  let cur = target(res[0].s);
+  let settled = res[0].a;          // time the camera arrived at `cur`
+  let drift = res[0].s.drift ?? 0.006;
+  const held = (st: S, from: number, until: number, d: number): S => ({...st, z: st.z * (1 + d * Math.max(0, until - from))});
+  for (let i = 1; i < res.length; i++) {
+    const {a, s} = res[i];
+    if (t < a) break;
+    const from = held(cur, settled, a, drift);
+    const to = target(s, cur);
+    const dur = s.dur ?? 1.8;
+    const p = prog(t, a, dur, E.move);
+    // Long moves between two close-ups pull back mid-way (a fly-over, not a slide).
+    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const dip = s.arc === false || dur <= 0 ? 0 : Math.min(0.35, (dist / 1920) * 0.6) * Math.min(1, (Math.min(from.z, to.z) - 1) / 0.5);
+    const z = Math.exp(mix(Math.log(from.z), Math.log(to.z), p)) / (1 + Math.max(0, dip) * Math.sin(Math.PI * p));
+    cur = {x: mix(from.x, to.x, p), y: mix(from.y, to.y, p), z};
+    if (p < 1) return cur;
+    cur = to;
+    settled = a + Math.max(0, dur);
+    drift = s.drift ?? 0.006;
+  }
+  return held(cur, settled, Math.max(t, settled), drift);
+};
 
 const useSteps = (steps: WashStep[] | undefined, t: number, initial: number) => {
   const cue = useCue();
@@ -371,6 +411,11 @@ const useSteps = (steps: WashStep[] | undefined, t: number, initial: number) => 
  *  - then: later states of the SAME composition (e.g. intact → ruined),
  *    cross-dissolved on their cue.
  *  - push: [scaleStart, scaleEnd]; focus: transform-origin ('50% 40%').
+ *  - camera: a track of CamStops that REPLACES push/focus — the camera travels over a
+ *    big plate (asset `"canvas": "4k"`) to whatever the narration names: parts of a
+ *    building, one speaker then the other, a figure in a crowd. The framed point sits a
+ *    little above centre (clear of the caption band). Edges are clamped: the plate always
+ *    fills the box.
  *  - children: overlays in the IMAGE's own 1920×1080 pixel space (read coordinates
  *    off `folio.py grid <video> <asset>`); they move with the push-in. Put pins,
  *    routes and tags that name things IN the picture here; free text goes outside.
@@ -378,8 +423,8 @@ const useSteps = (steps: WashStep[] | undefined, t: number, initial: number) => 
 export const Plate: React.FC<{
   src: string; at?: At; until?: At; box?: Partial<Box>; push?: [number, number]; focus?: string;
   wash?: number | WashStep[]; then?: ImgState[]; fit?: 'cover' | 'contain'; fade?: number;
-  rule?: boolean; style?: React.CSSProperties; children?: React.ReactNode;
-}> = ({src, at, until, box, push, focus = '50% 45%', wash, then, fit = 'cover', fade = 0.5, rule, style, children}) => {
+  rule?: boolean; style?: React.CSSProperties; children?: React.ReactNode; camera?: CamStop[];
+}> = ({src, at, until, box, push, focus = '50% 45%', wash, then, fit = 'cover', fade = 0.5, rule, style, children, camera}) => {
   const t = useT();
   const dur = useDur();
   const asset = useAsset();
@@ -400,6 +445,7 @@ export const Plate: React.FC<{
     const sa = typeof s.at === 'number' ? s.at : cue(s.at);
     layers.push({src: s.src, o: prog(t, sa, s.dur ?? 0.6, E.move)});
   }
+  const cam = useCamera(camera, t);
   if (op <= 0.001) return null;
   // Image space: plates and maps are normalised to 1920×1080. The image is fitted
   // into the box (cover/contain); CHILDREN are drawn in that same 1920×1080 image
@@ -407,15 +453,75 @@ export const Plate: React.FC<{
   const IW = 1920, IH = 1080;
   const fs = fit === 'cover' ? Math.max(b.w / IW, b.h / IH) : Math.min(b.w / IW, b.h / IH);
   const ox = (b.w - IW * fs) / 2, oy = (b.h - IH * fs) / 2;
+  let outer: React.CSSProperties = {transform: `scale(${scale})`, transformOrigin: focus};
+  if (cam) {
+    const z = Math.max(1, cam.z);
+    const cx = b.w / 2, cy = b.h * (inset ? 0.5 : 0.44);
+    const clampT = (v: number, o: number, span: number, box_: number) => Math.min(-z * o, Math.max(box_ - z * (o + span), v));
+    const tx = clampT(cx - z * (ox + cam.x * fs), ox, IW * fs, b.w);
+    const ty = clampT(cy - z * (oy + cam.y * fs), oy, IH * fs, b.h);
+    outer = {transform: `translate(${tx}px, ${ty}px) scale(${z})`, transformOrigin: '0 0'};
+  }
+  return (
+    <div style={{position: 'absolute', left: b.x, top: b.y, width: b.w, height: b.h, opacity: op, overflow: 'hidden',
+      boxShadow: inset && rule !== false ? '0 8px 26px rgba(40,30,20,0.22)' : undefined,
+      outline: inset && rule !== false ? '1px solid rgba(60,52,44,0.45)' : undefined, ...style}}>
+      <div style={{position: 'absolute', inset: 0, ...outer}}>
+        <div style={{position: 'absolute', left: ox, top: oy, width: IW, height: IH, transform: `scale(${fs})`, transformOrigin: '0 0'}}>
+          {layers.map((l, i) => (
+            <Img key={i} src={asset(l.src)} style={{position: 'absolute', left: 0, top: 0, width: IW, height: IH, opacity: l.o}} />
+          ))}
+          {washV > 0.001 && <div style={{position: 'absolute', inset: 0, background: paper, opacity: washV}} />}
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * A motion plate: a pre-made engraved-style video clip (asset kind `motion`, built by
+ * scripts/folio_motion.py from a Three.js proxy) played where a full-bleed Plate would sit.
+ * Only for scenes where something MOVES (battle, people walking/working, a camera move) —
+ * never for a comparison, definition or concept. The clip is cut to the scene's length
+ * (it holds its last frame if the action is shorter), so it starts at scene t=0 unless
+ * `at` says otherwise. Same box/push/wash/fade/children contract as Plate; keep overlays
+ * few — the picture moves under them.
+ */
+export const Motion: React.FC<{
+  src: string; at?: At; until?: At; box?: Partial<Box>; push?: [number, number]; focus?: string;
+  wash?: number | WashStep[]; fade?: number; rule?: boolean; style?: React.CSSProperties;
+  zoom?: number;  // extra scale (e.g. a cue-driven push-in), applied inside the clipped box
+  children?: React.ReactNode;
+}> = ({src, at, until, box, push, focus = '50% 45%', wash, fade = 0.5, rule, style, zoom = 1, children}) => {
+  const t = useT();
+  const dur = useDur();
+  const {fps} = useVideoConfig();
+  const asset = useAsset();
+  const {paper} = useInk();
+  const a = useAt(at, 0);
+  const u = until === undefined ? undefined : useAt(until);
+  const inset = !!box;
+  const b = {...BLEED, ...(box || {})};
+  const pz = push ?? [1.0, 1.0];
+  const end = u ?? dur;
+  const scale = zoom * mix(pz[0], pz[1], clamp01((t - a) / Math.max(0.1, end - a)));
+  const op = env(t, a, u, a === 0 ? 0 : fade, 0.4);
+  const washSteps = useSteps(typeof wash === 'number' ? undefined : wash, t, 0);
+  const washV = typeof wash === 'number' ? wash : washSteps;
+  if (op <= 0.001) return null;
+  const IW = 1920, IH = 1080;
+  const fs = Math.max(b.w / IW, b.h / IH);
+  const ox = (b.w - IW * fs) / 2, oy = (b.h - IH * fs) / 2;
   return (
     <div style={{position: 'absolute', left: b.x, top: b.y, width: b.w, height: b.h, opacity: op, overflow: 'hidden',
       boxShadow: inset && rule !== false ? '0 8px 26px rgba(40,30,20,0.22)' : undefined,
       outline: inset && rule !== false ? '1px solid rgba(60,52,44,0.45)' : undefined, ...style}}>
       <div style={{position: 'absolute', inset: 0, transform: `scale(${scale})`, transformOrigin: focus}}>
         <div style={{position: 'absolute', left: ox, top: oy, width: IW, height: IH, transform: `scale(${fs})`, transformOrigin: '0 0'}}>
-          {layers.map((l, i) => (
-            <Img key={i} src={asset(l.src)} style={{position: 'absolute', left: 0, top: 0, width: IW, height: IH, opacity: l.o}} />
-          ))}
+          <Sequence from={Math.round(a * fps)} layout="none">
+            <OffthreadVideo src={asset(src)} muted style={{position: 'absolute', left: 0, top: 0, width: IW, height: IH}} />
+          </Sequence>
           {washV > 0.001 && <div style={{position: 'absolute', inset: 0, background: paper, opacity: washV}} />}
           {children}
         </div>

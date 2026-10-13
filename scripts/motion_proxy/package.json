@@ -1,0 +1,6 @@
+{
+  "name": "motion-proxy",
+  "private": true,
+  "description": "Three.js blocking proxies for folio motion clips (scripts/folio_motion.py)",
+  "dependencies": { "three": "0.169.0", "puppeteer-core": "23.11.1" }
+}

@@ -52,6 +52,31 @@ number on the number, a strike on the word that negates).
   and which spoken phrases trigger each change (quote them). The author owns pixels and
   timing; you own meaning.
 
+### The camera — plates are big canvases
+
+Every plate and map is generated at **4K (3840×2160)**, so a scene can hold ONE picture and let
+a camera travel over it, framing whatever the narration names — instead of labelling it.
+Use it wherever it serves the telling; it is a tool, not a quota:
+
+- **a tour** — a building, a site, a landscape: whole view, then each part as it is named
+  (seating → dancing floor → stage building), each held while it is discussed;
+- **a conversation** — two (or more) people in one plate: frame the one speaking, cut to the
+  one answering, pull out to both (shot / reverse-shot);
+- **a reveal** — open close on a detail (tiny performers, a hidden cup, one face) and pull
+  out to what surrounds it (the crowd of thousands, the whole deceit);
+- **reading a tableau** — one composition read in stages, figure by figure, as the
+  narration reaches each.
+
+A camera plate can carry a longer scene (15–40 s) because every move is a change. Brief it as
+camera stops on quoted phrases ("whole view; on 'somewhere for the audience to sit' to the
+seated crowd at left; on 'stood the skene' to the hut"). Write its prompt FOR the camera: a
+wide, deep composition, every figure and feature the narration names clearly separated from
+the others with open space between them, set a little in from the picture's edges (the camera
+cannot centre what sits on the border), each one large and detailed enough to fill the frame
+at 2–2.5× (one face, one object, one group). Prefer the camera to labels and leader lines for
+naming things inside a picture; keep type for names, terms, dates and numbers the picture
+cannot show.
+
 Density: **3–5 scenes per minute, never more than 5** (a 20-minute video ≈ 60–100 scenes);
 the lower end for analytical history, the upper for narrative. Scenes of 4.5–45 s, most
 10–25 s — a composition that keeps building beats a new composition every 8 s. Pace follows the narration: enumeration and action → quicker builds; argument →
@@ -70,7 +95,8 @@ of the caption, which is already on screen. Reach for:
 | contrasts two things / ranks / prefers | a two-column **ledger** (X over Y), losers struck through in crimson |
 | lists items | a roman-numeral **list** that builds line by line |
 | tells what happened to a thing (built, burned, lost, split, copied) | a **then-state**: the same engraving in a second state cross-dissolving on the verb |
-| describes a scene, a building, an event | a full-bleed **plate** with a slow push-in; wash it back when cards or type arrive |
+| describes a scene, a building, an event | a full-bleed **plate** — a slow push-in, or the **camera** travelling it to each part as it is named; wash it back when cards or type arrive |
+| two people talk, argue, answer | ONE plate with both; the camera cuts between speaker and listener |
 | names an object (a book, a mask, a vase, a ship type) | an isolated **object** cutout drawn on over paper |
 | lands a verdict or a turn | a statement in Bodoni, or (rarely, ≤ 1 per 40 s) a crimson punch |
 | relates people or cities | cards or tags joined by lines that draw (lineage, alliance, influence) |
@@ -82,10 +108,11 @@ reference ("THE FIFTH CENTURY", "TWO KINDS OF EVIDENCE").
 
 ## Assets — generate aggressively, one medium
 
-Images are cheap (≈ $0.04 each); use them. Target **≥ 1 generated asset in ≥ 85 % of
+Images are cheap (≈ $0.10 a 4K plate, ≈ $0.04 a portrait or object); use them. Target **≥ 1 generated asset in ≥ 85 % of
 scenes, 6–10 images per minute overall** (a 20-minute video ≈ 120–200 assets). Kinds:
 
-- `plate` — full-bleed 16:9 scene (a place, an event, a building, a crowd, a landscape).
+- `plate` — full-bleed 16:9 scene (a place, an event, a building, a crowd, a landscape),
+  generated at 4K so the camera can move into it (see "The camera").
 - `portrait` — 3:4 head-and-shoulders bust for a card. Historical figures: "drawn as the
   marble portrait bust … as in the <museum> bust" (a real likeness anchor). Mythic/Homeric
   figures: "after a neoclassical marble". Every recurring person gets a `cast` entry
@@ -104,8 +131,9 @@ scenes, 6–10 images per minute overall** (a 20-minute video ≈ 120–200 asse
 Asset fields: `{id, kind, prompt, cast?: [cast ids in the picture], of?, places? (maps),
 trim?: [left, top, right, bottom] (fractions of the raw image to cut — QA's fix for a plate the
 model drew with a wide paper margin),
+canvas?: "2k" | "1080" (overrides the episode's 4K for one plate — rarely needed),
 world?: false (subject outside the series' period, e.g. a 15th-century library or a 1890s
-excavation), model?: "flash" | "gpt" (set by QA escalation, not by you), shared?: true (series-wide portraits/objects
+excavation), shared?: true (series-wide portraits/objects
 reused across episodes), from?: "<repo-relative image path>" (reuse an image already on disk —
 a plate from another episode, a contact sheet, a render still — instead of generating one; no
 prompt needed; add `"finish": false` to keep a screenshot's own colours)}`.
@@ -129,6 +157,7 @@ Prompt rules (the model sees the house style clause + `world` + cast looks + you
   "title": "<episode title>",
   "chrome": {"running": "<series name, e.g. Greek Tragedy>", "subtitle": "<short episode title>"},
   "tail": 2.5,   // silent hold (s) after the last word: the final scene is extended so the ending breathes
+  "canvas": "4k", // ALWAYS: every plate and map at 3840×2160 for the camera
   "off_screen": [{"what": "the capture on Sphacteria", "why": "a later episode tells it; the narration only points to Pylos", "terms": ["Sphacteria", "292"]}],
   "world": "<period anchor, positive, ≤120 words>",
   "cast": [{"id": "aeschylus", "name": "Aeschylus", "look": "<face, hair, beard, dress; likeness anchor>", "portrait": "aeschylus"}],
