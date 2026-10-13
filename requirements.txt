@@ -7,6 +7,7 @@ python-dotenv>=1.0.0
 # Text-to-speech + Scribe speech-to-text (the only paid API)
 elevenlabs>=1.0.0
 mutagen>=1.47.0           # MP3 duration/metadata reading
+modal>=1.2.0              # TTS_PROVIDER=drama3: open-weights Drama 3 on a Modal GPU (scripts/drama3_modal.py)
 
 # YouTube as an input source
 yt-dlp>=2025.1.1          # audio download for Scribe transcription

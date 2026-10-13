@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-TTS Audio Generation Script — ElevenLabs (default), Cartesia or HeyGen
+TTS Audio Generation Script — ElevenLabs (default), Cartesia, HeyGen or Drama 3 (open weights)
 
 Generates one MP3 per frame from the script's flat narration text, spoken verbatim
 (a LEGACY math frame's natural_narration in math_verification.json is still honoured).
 Word-level timestamps come back with each synthesis and are saved next to the audio
 (audio/frame_N_timestamps.json) for downstream steps (animate, subtitles).
 
-Providers — choose one with TTS_PROVIDER=elevenlabs|cartesia|heygen in .env (unset = elevenlabs);
-all return the same mp3 + word-timestamp shape, so nothing downstream branches:
+Providers — choose one with TTS_PROVIDER=elevenlabs|cartesia|heygen|drama3 in .env (unset =
+elevenlabs); all return the same mp3 + word-timestamp shape, so nothing downstream branches:
   elevenlabs  ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID (override per run: --voice-id)
   cartesia    CARTESIA_API_KEY + CARTESIA_VOICE_ID (CARTESIA_TTS_MODEL, default sonic-3.6)
   heygen      HEYGEN_API_KEY + HEYGEN_VOICE_ID
+  drama3      a Modal account (`modal setup`) + reference clips in DRAMA3_REFS_DIR — Fish Audio
+              Drama 3 open weights on a Modal GPU (scripts/drama3_modal.py). A session pays a
+              ~3-4 min start-up, so this process voices a video's pending frames in one batch,
+              and scripts/tts_drama3_batch.py voices whole lectures in one session.
 `--profile <provider>` overrides TTS_PROVIDER for one run.
 
 There is no provider pronunciation dictionary: narration is voiced VERBATIM, and a token voices
@@ -84,6 +88,7 @@ PROVIDERS = {
     'elevenlabs': ('ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'),
     'cartesia': ('CARTESIA_API_KEY', 'CARTESIA_VOICE_ID'),
     'heygen': ('HEYGEN_API_KEY', 'HEYGEN_VOICE_ID'),
+    'drama3': (None, 'DRAMA3_REFS_DIR'),     # Modal token in ~/.modal.toml; voice = reference clips
 }
 TTS_META = 'tts_meta.json'   # audio/tts_meta.json: which provider/voice/model voiced this video
 PROVIDER = 'elevenlabs'
@@ -98,6 +103,10 @@ def activate_provider(name: str) -> None:
     if name not in PROVIDERS:
         raise SystemExit(f"✗ Unknown TTS provider {name!r} ({' | '.join(PROVIDERS)})")
     PROVIDER = name
+    if name == 'drama3':
+        d = _drama3_module()
+        VOICE_ID, MODEL_ID = d.refs_id(), d.MODEL_ID
+        return
     VOICE_ID, MODEL_ID = {
         'elevenlabs': (ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL_ID),
         'cartesia': (CARTESIA_VOICE_ID, CARTESIA_MODEL_ID),
@@ -108,12 +117,61 @@ def activate_provider(name: str) -> None:
 def check_provider_config() -> None:
     """Exit with a clear message if the active provider's key or voice is missing."""
     key_var, voice_var = PROVIDERS[PROVIDER]
+    if PROVIDER == 'drama3':
+        if not (Path.home() / '.modal.toml').exists() and not os.getenv('MODAL_TOKEN_ID'):
+            raise SystemExit("✗ drama3 TTS needs a Modal token: pip install modal && modal setup")
+        return                      # the reference clips were checked by activate_provider
     if not os.getenv(key_var):
         hint = ("" if os.getenv('TTS_PROVIDER') else
-                " — or pick another provider: TTS_PROVIDER=elevenlabs|cartesia|heygen")
+                " — or pick another provider: TTS_PROVIDER=elevenlabs|cartesia|heygen|drama3")
         raise SystemExit(f"✗ {PROVIDER} TTS needs {key_var} in .env{hint}")
     if not VOICE_ID:
         raise SystemExit(f"✗ {PROVIDER} TTS needs {voice_var} in .env (the voice to narrate in)")
+
+
+# Drama 3 (open weights on Modal): one warm container per process; frames are voiced in batches
+# (drama3_prefetch) and served to the per-frame calls from a cache.
+_DRAMA3 = {'session': None, 'cache': {}}
+
+
+def _drama3_module():
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import drama3_modal
+    return drama3_modal
+
+
+def drama3_session():
+    """The process's warm Drama 3 container (opened on first use, closed at exit)."""
+    if _DRAMA3['session'] is None:
+        import atexit
+        print("  [drama3] starting a Modal H100 container (~3-4 min to load the weights)...")
+        sess = _drama3_module().Session()
+        sess.__enter__()
+        atexit.register(sess.__exit__, None, None, None)
+        _DRAMA3['session'] = sess
+    return _DRAMA3['session']
+
+
+def drama3_prefetch(texts):
+    """Voice every text in one batch; call_drama3_api then serves them from the cache.
+    Returns {text: error} for any that failed."""
+    todo = [t for t in dict.fromkeys(texts) if t and t not in _DRAMA3['cache']]
+    if not todo:
+        return {}
+    out, errs = drama3_session().synthesize(list(enumerate(todo)))
+    for i, t in enumerate(todo):
+        if i in out:
+            _DRAMA3['cache'][t] = out[i]
+    return {todo[i]: e for i, e in errs.items()}
+
+
+def call_drama3_api(text):
+    """(mp3 bytes at 44.1 kHz / 192k, word timestamps) — the call_elevenlabs_api shape."""
+    if text not in _DRAMA3['cache']:
+        errs = drama3_prefetch([text])
+        if errs:
+            raise RuntimeError(f"Drama 3: {errs[text]}")
+    return _DRAMA3['cache'].pop(text)
 
 
 _env_provider = os.getenv('TTS_PROVIDER', '').strip().lower()
@@ -285,7 +343,7 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
     given, is passed as a voice setting; language_code, when given, enforces a language
     on the model (disables per-request language auto-detection).
 
-    With the Cartesia or HeyGen provider active (and no voice_id), the call is routed
+    With the Cartesia, HeyGen or Drama 3 provider active (and no voice_id), the call is routed
     there — same return shape, so callers never branch on the provider.
 
     Returns:
@@ -296,6 +354,8 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
         return call_cartesia_api(text)
     if PROVIDER == 'heygen' and not voice_id:
         return call_heygen_api(text)
+    if PROVIDER == 'drama3' and not voice_id:
+        return call_drama3_api(text)
     if not ELEVENLABS_API_KEY:
         raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
 
@@ -554,6 +614,13 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
         Path(output_dir, TTS_META).write_text(json.dumps(cur, indent=2) + "\n")
     check_provider_config()
 
+    if PROVIDER == 'drama3':
+        # One GPU batch for every pending frame (the per-frame calls below hit the cache).
+        pending = [clean_narration_text(get_natural_narration(f.number, f.text, math_data)) for f in frames
+                   if not os.path.exists(os.path.join(output_dir, f"frame_{f.number}.mp3"))]
+        for t, e in drama3_prefetch(pending).items():
+            print(f"  [drama3] failed: {e} — {t[:60]}...")
+
     for frame in frames:
         frame_filename = f"frame_{frame.number}.mp3"
         output_path = os.path.join(output_dir, frame_filename)
@@ -716,7 +783,7 @@ def main():
     """Main execution function"""
     if len(sys.argv) < 2:
         print("Usage: python generate_tts_elevenlabs.py <path_to_script> "
-              "[--profile elevenlabs|cartesia|heygen] [--voice-id VOICE_ID]")
+              "[--profile elevenlabs|cartesia|heygen|drama3] [--voice-id VOICE_ID]")
         print()
         print("Example:")
         print("  python generate_tts_elevenlabs.py Week-1/Video-1/script.json")

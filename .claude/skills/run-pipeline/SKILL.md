@@ -16,7 +16,7 @@ prompt each step needs; the subagent works from that plus what a blind API call 
 (codegen gets a render→look→fix loop, math verification runs SymPy itself). `pipeline.py` is
 called only for deterministic slices (`--from X --to Y`: transcribe, tts, animate-render,
 compile, subtitle). The only paid external calls are the TTS provider (`TTS_PROVIDER`: ElevenLabs,
-Cartesia or HeyGen) and, only for audio/video sources without captions, ElevenLabs Scribe — plus, in folio
+Cartesia, HeyGen, or Drama 3 on Modal's free monthly GPU credit) and, only for audio/video sources without captions, ElevenLabs Scribe — plus, in folio
 (humanities) runs only, image generation (OpenAI gpt-image, Gemini for maps). Use your most
 capable available model for every subagent, and pass it explicitly rather than relying on
 inheritance.
@@ -69,9 +69,26 @@ provider's `*_VOICE_ID`) — pass no `--voice-id`/`--profile`.
   segment → colour scheme (math/technical only).
 - **Phase B1 — scripting, one agent per video, reporting to the orchestrator:** the script;
   the orchestrator runs the review relay in the middle.
+- **Batch TTS — only with `TTS_PROVIDER=drama3`, orchestrator:** once every video in the batch
+  has passed script review, voice them all in one GPU session (below), then spawn B2.
 - **Phase B2 — production, one producer per video:** spawned only once B1's artifacts are on
-  disk; takes the video through verification, codegen, render, compile, subtitle and frame
-  audit.
+  disk (with drama3, the batch audio too); takes the video through verification, codegen,
+  render, compile, subtitle and frame audit.
+
+**Drama 3 batching (`TTS_PROVIDER=drama3`).** A session costs ~3-4 min of Modal H100 start-up
+(~US$0.25) and then ~US$0.02 per 10 min of narration, so TTS runs once per batch, not per video:
+
+- **A batch = the lecture/unit being run — and, when it has ≤ 4 videos, the NEXT lecture/unit
+  too** (run Phase A + B1 for both without asking; the next one has to be made anyway). At most
+  two lectures; one of ≥ 5 videos is its own batch.
+- After the last B1 passes review:
+  ```bash
+  venv/bin/python scripts/tts_drama3_batch.py pipeline/<L1> [pipeline/<L2>] 2>&1 | tee /tmp/run_pipeline_logs/<L1>_tts.log
+  ```
+  It runs the narration gate per video (a blocked video is skipped and listed — fix the source
+  and re-run; voiced frames are skipped), voices every pending frame in one session, writes
+  `audio/` as the per-video TTS would, and flags frames whose speaking rate looks wrong (listen
+  to those). Then spawn the producers; their `--from tts` slice finds the audio done.
 
 A fresh agent per video keeps each context focused. Run multi-video sources in parallel
 batches of ~3 (4K renders are CPU-heavy); B1 agents may also run in parallel, and each video's

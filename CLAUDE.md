@@ -23,7 +23,8 @@ LLM step (clean, segment, script, verify_math, color_scheme, color_plan, manim c
 animate-render of pre-authored sources, compile, subtitle) and halts with the
 exact `render_step_prompt.py` command when it reaches a subagent-authored step.
 The only paid external service the math/technical pipeline needs is ONE TTS provider —
-ElevenLabs, Cartesia or HeyGen (`TTS_PROVIDER`). ElevenLabs Scribe is optional, used only to
+ElevenLabs, Cartesia or HeyGen (`TTS_PROVIDER`) — or none: `drama3` runs open weights on Modal's
+US$30/month free GPU credit. ElevenLabs Scribe is optional, used only to
 transcribe an audio/video file or a caption-less YouTube video; the folio (humanities) pipeline
 adds image generation (see "Folio").
 
@@ -290,12 +291,26 @@ false positive with `SKIP_NARRATION_CHECK=1`.
 
 `generate_tts_elevenlabs.py` voices narration VERBATIM with the provider chosen by
 `TTS_PROVIDER` in `.env` — `elevenlabs` (the fallback when unset), `cartesia` (SSE endpoint,
-word timestamps on the narration's own tokens) or `heygen` (streaming endpoint with
-timestamps); `--profile <provider>` overrides it for one run. Each provider reads its key and voice from `.env` and returns the same
+word timestamps on the narration's own tokens), `heygen` (streaming endpoint with
+timestamps) or `drama3` (below); `--profile <provider>` overrides it for one run. Each provider reads its key and voice from `.env` and returns the same
 mp3 + word-timestamp shape, so animate, subtitles and folio need no changes.
 `audio/tts_meta.json` records provider/voice/model: a resumed video finishes in that narrator,
 `pipeline.py` keeps one narrator per lecture, and `fix_tts_sentence.py` re-voices sentences in
 the recorded voice (no meta = ElevenLabs).
+
+**Drama 3 (`TTS_PROVIDER=drama3`).** Fish Audio's open weights (35B MoE, 3B active) served by
+sglang-omni on one Modal H100 (`scripts/drama3_modal.py`: image, warm container, `Session`),
+cloned zero-shot from 1–3 clips in `DRAMA3_REFS_DIR` (`ref_N.wav` + exact transcript `ref_N.txt`,
+≤ 60 s each; their hash is the voice id in `tts_meta.json`). The server returns audio only;
+wav2vec2 CTC forced alignment of the narration's own tokens on the same GPU supplies the word
+timestamps (median ~54 ms from a hosted provider's). A session costs ~3–4 min of start-up
+(~US$0.25), then ~US$0.02 per 10 min of narration, so **batch**: `tts_drama3_batch.py
+pipeline/<L1> [pipeline/<L2>]` voices every pending frame of every video in one session
+(narration gate per video, speaking-rate flags for a skipped/doubled sentence);
+`generate_tts_elevenlabs.py` batches one video's frames; `fix_tts_sentence.py` re-voices in a
+warm container (one start-up per run). Setup: `pip install modal && modal setup`,
+`python scripts/drama3_modal.py download`. No `seed`; rare names may vary frame to frame —
+include them in a reference clip.
 
 There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
 NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for
@@ -335,7 +350,9 @@ fallback transcription — compile and subtitle must run serially.
 | `segment_concepts.py` | Materialize segmentation: `--apply RESPONSE.json` or `--single-video` |
 | `generate_scripts.py` | Script prompt templates (math/technical/folio) + argument-map helpers |
 | `verify_math.py` | SymPy helpers for math verification |
-| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps — ElevenLabs (default), `--profile cartesia` / `heygen` |
+| `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps — ElevenLabs (default), `--profile cartesia` / `heygen` / `drama3` |
+| `tts_drama3_batch.py` | Drama 3: voice many videos/lectures in ONE Modal GPU session (the cheap way) |
+| `drama3_modal.py` | Drama 3 on Modal: image, warm server + forced aligner, `Session`; `download` once |
 | `fix_tts_sentence.py` | Zero-shift sentence-swap TTS fix (edit source → run → recompile) |
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
@@ -360,10 +377,11 @@ fallback transcription — compile and subtitle must run serially.
 ## API Keys (.env)
 
 ```env
-TTS_PROVIDER=elevenlabs           # elevenlabs | cartesia | heygen — fill in THAT provider's key + voice:
+TTS_PROVIDER=elevenlabs           # elevenlabs | cartesia | heygen | drama3 — fill in THAT provider's key + voice:
 ELEVENLABS_API_KEY= / ELEVENLABS_VOICE_ID=      # key needs text_to_speech
 CARTESIA_API_KEY= / CARTESIA_VOICE_ID= / CARTESIA_TTS_MODEL=sonic-3.6
 HEYGEN_API_KEY= / HEYGEN_VOICE_ID=
+# drama3: no key — `modal setup` (~/.modal.toml); voice = DRAMA3_REFS_DIR (default inputs/voice/drama3_refs)
 # Optional transcription (audio/video files, caption-less YouTube): ELEVENLABS_API_KEY with
 # speech_to_text (Scribe), whichever TTS provider; without it local files use Whisper.
 ```

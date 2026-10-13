@@ -969,7 +969,7 @@ def run_video_step(step: str, video_dir: Path, lecture_dir: Path,
                 print(f"\n{Colors.RED}{format_report(offenders, video_dir)}{Colors.RESET}")
                 return False
 
-        # Provider: ElevenLabs by default; TTS_PROVIDER=cartesia|heygen|elevenlabs picks
+        # Provider: ElevenLabs by default; TTS_PROVIDER=cartesia|heygen|drama3|elevenlabs picks
         # another (generate_tts_elevenlabs.py reads it and the voice from .env). One narrator per
         # lecture: when the variable is unset and the lecture's other videos were all voiced by
         # one provider (audio/tts_meta.json; no meta = ElevenLabs), this video uses it too.

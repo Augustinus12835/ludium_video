@@ -219,6 +219,9 @@ the scheme before honouring it.
 venv/bin/python scripts/pipeline.py video <L>/Video-N --from tts --to tts --no-review --<mode>
 ```
 
+With `TTS_PROVIDER=drama3` the orchestrator has normally voiced this video already in its batch
+(`tts_drama3_batch.py`, SKILL.md "Drama 3 batching"), so this slice finds every frame done; if
+it starts voicing, it opens its own Modal container (~3-4 min, ~US$0.27) — fine for one straggler.
 If the pre-TTS narration gate halts it, triage per references/recovery.md ("narration
 check"); `SKIP_NARRATION_CHECK=1` only for a confirmed false positive.
 
