@@ -15,7 +15,10 @@ animations and subtitles sync to it word by word.
 ## See it
 
 - **[The Video That Made Itself](https://www.youtube.com/watch?v=x-iBXDS6faQ)**:
-  the math/technical pipeline, explained by a video it made.
+  the math/technical pipeline, explained by a video it made. *(The video says you need an
+  ElevenLabs subscription; the TTS provider is now your choice, and high-quality narration can
+  run free on the open-weights Drama 3 model with Modal's monthly compute credit — see
+  "Free narration" below.)*
 - **[From Book to Documentary](https://www.youtube.com/watch?v=v2g8pILvm10)**:
   the folio pipeline, from a book to a finished film, and how each script and
   picture is checked.
