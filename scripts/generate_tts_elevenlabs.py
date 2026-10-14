@@ -131,7 +131,23 @@ def check_provider_config() -> None:
 
 # Drama 3 (open weights on Modal): one warm container per process; frames are voiced in batches
 # (drama3_prefetch) and served to the per-frame calls from a cache.
-_DRAMA3 = {'session': None, 'cache': {}}
+_DRAMA3 = {'session': None, 'cache': {}, 'style': ''}
+# House style: ONE fixed line-level direction on every Drama 3 request. In A/B tests on math
+# narration, this calm-lecturer prefix plus inline tags read best, while per-frame styles written
+# by the tagger sounded mannered (so the tag gate still rejects authored prefixes). Recorded in
+# tts_meta.json "style": a video keeps the style it was voiced with, so resumes and sentence fixes
+# match. DRAMA3_STYLE in .env overrides it; DRAMA3_STYLE= (empty) turns it off.
+DRAMA3_STYLE = os.getenv('DRAMA3_STYLE',
+                         '[a calm, engaged lecturer working through the algebra at the board]').strip()
+
+
+def drama3_video_style(audio_dir) -> str:
+    """The style a video is voiced in: its recorded one once it holds audio, else the house style."""
+    have_audio = Path(audio_dir).exists() and any(Path(audio_dir).glob('frame_*.mp3'))
+    meta = read_tts_meta(audio_dir)
+    if have_audio:
+        return (meta or {}).get('style', '')
+    return DRAMA3_STYLE
 
 
 def _drama3_module():
@@ -152,16 +168,21 @@ def drama3_session():
     return _DRAMA3['session']
 
 
-def drama3_prefetch(texts):
-    """Voice every text in one batch; call_drama3_api then serves them from the cache.
-    Returns {text: error} for any that failed."""
-    todo = [t for t in dict.fromkeys(texts) if t and t not in _DRAMA3['cache']]
+def _styled(text, style):
+    return f"{style} {text}" if style else text
+
+
+def drama3_prefetch(texts, style=None):
+    """Voice every text in one batch (in `style`, default the active one); call_drama3_api then
+    serves them from the cache. Returns {text: error} for any that failed."""
+    style = _DRAMA3['style'] if style is None else style
+    todo = [t for t in dict.fromkeys(texts) if t and (style, t) not in _DRAMA3['cache']]
     if not todo:
         return {}
-    out, errs = drama3_session().synthesize(list(enumerate(todo)))
+    out, errs = drama3_session().synthesize([(i, _styled(t, style)) for i, t in enumerate(todo)])
     for i, t in enumerate(todo):
         if i in out:
-            _DRAMA3['cache'][t] = out[i]
+            _DRAMA3['cache'][(style, t)] = out[i]
     return {todo[i]: e for i, e in errs.items()}
 
 
@@ -194,11 +215,12 @@ def load_tagged_map(script_dir) -> Dict[int, str]:
 
 def call_drama3_api(text):
     """(mp3 bytes at 44.1 kHz / 192k, word timestamps) — the call_elevenlabs_api shape."""
-    if text not in _DRAMA3['cache']:
+    key = (_DRAMA3['style'], text)
+    if key not in _DRAMA3['cache']:
         errs = drama3_prefetch([text])
         if errs:
             raise RuntimeError(f"Drama 3: {errs[text]}")
-    return _DRAMA3['cache'].pop(text)
+    return _DRAMA3['cache'].pop(key)
 
 
 _env_provider = os.getenv('TTS_PROVIDER', '').strip().lower()
@@ -210,6 +232,8 @@ def current_tts_meta() -> Dict:
     meta = {'provider': PROVIDER, 'voice_id': VOICE_ID, 'model_id': MODEL_ID}
     if PROVIDER == 'heygen':
         meta['expressiveness'] = HEYGEN_EXPRESSIVENESS
+    if PROVIDER == 'drama3':
+        meta['style'] = _DRAMA3['style']
     return meta
 
 
@@ -229,6 +253,8 @@ def apply_tts_meta(meta: Dict) -> None:
     MODEL_ID = meta.get('model_id') or MODEL_ID
     if PROVIDER == 'heygen':
         HEYGEN_EXPRESSIVENESS = float(meta.get('expressiveness', HEYGEN_EXPRESSIVENESS))
+    if PROVIDER == 'drama3':
+        _DRAMA3['style'] = meta.get('style', '')     # fixes re-voice in the video's own style
 
 
 _client = None
@@ -616,6 +642,8 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
     # One video = one narrator. A video already part-voiced finishes in its recorded voice
     # (audio/tts_meta.json; no meta = voiced by ElevenLabs before metas existed) unless a
     # provider/voice was requested explicitly — then a mismatch is refused, never mixed.
+    if PROVIDER == 'drama3':
+        _DRAMA3['style'] = drama3_video_style(output_dir)
     meta = read_tts_meta(output_dir)
     have_audio = any(f.startswith('frame_') and f.endswith('.mp3') for f in os.listdir(output_dir))
     if meta and not have_audio:

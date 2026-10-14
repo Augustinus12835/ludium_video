@@ -325,6 +325,12 @@ scripts.utils.drama3_tags apply <dir> <resp>`; the gate keeps the spoken words i
 the clean words, so timestamps, subtitles and Manim cues are unchanged; `pipeline.py` halts at a
 `tag` step when the flag is set and a script is untagged.
 
+**House style.** Every Drama 3 request is prefixed with one fixed line-level direction,
+`[a calm, engaged lecturer working through the algebra at the board]` — with inline tags it read
+best in A/B tests, whereas per-frame styles written by the tagger sounded mannered (the tag gate
+still rejects authored prefixes). `DRAMA3_STYLE` in `.env` overrides it (empty = off); it is
+recorded per video in `tts_meta.json` `"style"`, so a video keeps the style it was voiced with.
+
 There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
 NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for
 CAPM); one table feeds the script prompts, the pre-TTS gate (`alias`) and the subtitle

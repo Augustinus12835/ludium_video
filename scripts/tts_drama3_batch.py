@@ -77,12 +77,14 @@ def main():
     if not plan:
         print("Nothing to voice." + (f" {len(blocked)} video(s) blocked by the narration gate." if blocked else ""))
         sys.exit(1 if blocked else 0)
-    texts = []
-    for _, _, md, pend, tm in plan:
+    texts, by_style = [], {}      # each video keeps its own style (tts_meta "style"; house style if new)
+    for vd, _, md, pend, tm in plan:
+        style = tts.drama3_video_style(vd / "audio")
         for f in pend:
             try:
-                texts.append(tts.drama3_spoken(f.number, tts.clean_narration_text(
-                    tts.get_natural_narration(f.number, f.text, md)), tm))
+                t = tts.drama3_spoken(f.number, tts.clean_narration_text(
+                    tts.get_natural_narration(f.number, f.text, md)), tm)
+                texts.append(t); by_style.setdefault(style, []).append(t)
             except RuntimeError as e:
                 print(f"  ✗ {e}")
     tagged_videos = sum(1 for p in plan if p[4])
@@ -93,8 +95,9 @@ def main():
     failed = 0
     with tts._drama3_module().Session() as sess:
         tts._DRAMA3['session'] = sess
-        for t, e in tts.drama3_prefetch(texts).items():
-            print(f"  ✗ Drama 3 failed: {e} — {t[:60]}...")
+        for style, ts in by_style.items():
+            for t, e in tts.drama3_prefetch(ts, style).items():
+                print(f"  ✗ Drama 3 failed: {e} — {t[:60]}...")
         for vd, frames, math_data, _, tm in plan:
             print(f"\n=== {vd}" + (" (Drama 3 delivery tags)" if tm else ""))
             results = tts.generate_audio_for_frames(frames, str(vd / "audio"), math_data, tagged_map=tm)
