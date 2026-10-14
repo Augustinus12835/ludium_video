@@ -106,6 +106,10 @@ Setup, once:
    pronunciation (rare names it never hears may vary between frames, so include them in a clip).
 4. Set `TTS_PROVIDER=drama3` in `.env`.
 
+Optional: `DRAMA3_TAGS=1` adds a subagent step that marks a few words per frame with Drama 3's
+inline delivery controls — `<emphasis>`, `<slow>`, `[pause]` — so the narrator stresses the
+word an idea turns on, like a teacher at the board. The spoken words never change.
+
 Drama 3 is under the [Fish Audio Community License](https://huggingface.co/fishaudio/drama-3):
 free for research and for commercial use while your annual revenue is under US$500k, with
 "Built with Fish Audio" shown on a related page; clone only voices you have consent to use.

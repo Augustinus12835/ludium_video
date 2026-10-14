@@ -24,6 +24,7 @@ file into the container — keep its top-level imports to the standard library +
 import contextlib
 import hashlib
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -40,7 +41,10 @@ REFS_DIR = Path(os.getenv("DRAMA3_REFS_DIR") or REPO / "inputs" / "voice" / "dra
 if not REFS_DIR.is_absolute():
     REFS_DIR = REPO / REFS_DIR
 CONCURRENCY = 16          # the engine's max_running_requests default
-MAX_CHUNK_CHARS = 1500    # longer frames are voiced and aligned in sentence-aligned chunks
+MAX_CHUNK_CHARS = 900     # longer frames are voiced and aligned in sentence-aligned chunks. Drama 3
+                          # stops a request at ~95 s of audio (~15 chars/s): 1500-char chunks silently
+                          # lost the tail of long frames in production; 900 ≈ 60 s.
+MAX_CLIP_SECONDS = 90.0   # a chunk this long has probably hit that cap — fail it, never ship it
 GAP_SECONDS = 0.25        # silence between chunks of one frame
 
 image = (
@@ -57,18 +61,45 @@ vol = modal.Volume.from_name("drama3-weights", create_if_missing=True)
 app = modal.App("ludium-drama3", image=image)
 
 
+# Drama 3 directions (technical report, Appendix C) are ordinary text the model reads and never
+# speaks: point tags `[pause]`, scoped tags `<emphasis>…</emphasis>`, a style prefix `[warm] line`,
+# or a director's note `Direction: …\nLine: …`. They steer delivery; the aligner places only the
+# spoken words, so markup is stripped first (`spoken_text`).
+_NOTE = re.compile(r"^\s*Direction:.*?\nLine:\s*", re.S)
+_MARKUP = re.compile(r"\[[^\[\]\n]*\]|</?[A-Za-z][^<>\n]*>")
+
+
+def line_direction(text):
+    """(line-level direction to repeat on every chunk, the rest): a director's note or a
+    leading style prefix applies to the whole line, so a long frame's chunks all get it."""
+    m = _NOTE.match(text)
+    if m:
+        return m.group(0), text[m.end():]
+    m = re.match(r"^\s*(\[[^\[\]\n]*\])\s+", text)
+    if m and not re.fullmatch(r"\[(pause|breath|sighs?|laughs?)\]", m.group(1)):
+        return m.group(1) + " ", text[m.end():]
+    return "", text
+
+
+def spoken_text(text):
+    """The words actually spoken: the text minus every direction."""
+    t = " ".join(_MARKUP.sub(" ", _NOTE.sub("", text)).split())
+    return re.sub(r"\s+([.,;:!?)\]])", r"\1", t)          # "sixteen</emphasis>." -> "sixteen."
+
+
 def _chunks(text, limit=MAX_CHUNK_CHARS):
-    """Sentence-aligned chunks of at most ~limit characters (a lone long sentence stays whole)."""
-    import re
-    if len(text) <= limit:
-        return [text]
+    """Sentence-aligned chunks of at most ~limit characters (a lone long sentence stays whole);
+    a line-level direction is repeated on each chunk."""
+    head, body = line_direction(text)
+    if len(body) <= limit:
+        return [head + body]
     out, cur = [], ""
-    for s in re.split(r"(?<=[.!?])\s+", text.strip()):
+    for s in re.split(r"(?<=[.!?])\s+", body.strip()):
         if cur and len(cur) + 1 + len(s) > limit:
             out.append(cur); cur = s
         else:
             cur = f"{cur} {s}" if cur else s
-    return out + [cur] if cur else out
+    return [head + c for c in (out + [cur] if cur else out)]
 
 
 def _align(model, processor, audio16k, words):
@@ -172,6 +203,11 @@ class Drama3:
                     audio[(key, ci)] = RuntimeError(f"{r.status_code} {r.text[:1000]}")
                     continue
                 pcm, sr = sf.read(io.BytesIO(r.content), dtype="float32")
+                if len(pcm) / sr >= MAX_CLIP_SECONDS:
+                    audio[(key, ci)] = RuntimeError(
+                        f"clip is {len(pcm) / sr:.0f} s — likely cut off at Drama 3's ~95 s cap "
+                        f"({len(chunk)} chars); lower MAX_CHUNK_CHARS")
+                    continue
                 audio[(key, ci)] = (pcm.mean(1) if pcm.ndim > 1 else pcm, sr, chunk)
         print(f"voiced {len(jobs)} chunks in {time.time() - t0:.0f}s", flush=True)
         out = []
@@ -186,7 +222,7 @@ class Drama3:
             for i, (p, _, chunk) in enumerate(parts):
                 if i:
                     pcm.append(gap); offset += GAP_SECONDS
-                toks = chunk.split()
+                toks = spoken_text(chunk).split()
                 spans = _align(self.aligner, self.processor, librosa.resample(p, orig_sr=sr, target_sr=16000), toks)
                 words += [{"word": w, "start": round(s + offset, 3), "end": round(e + offset, 3)}
                           for w, (s, e) in zip(toks, spans)]

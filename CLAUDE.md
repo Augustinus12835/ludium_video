@@ -310,7 +310,20 @@ pipeline/<L1> [pipeline/<L2>]` voices every pending frame of every video in one 
 `generate_tts_elevenlabs.py` batches one video's frames; `fix_tts_sentence.py` re-voices in a
 warm container (one start-up per run). Setup: `pip install modal && modal setup`,
 `python scripts/drama3_modal.py download`. No `seed`; rare names may vary frame to frame —
-include them in a reference clip.
+include them in a reference clip. Drama 3 stops a request at ~95 s of audio, so frames are
+voiced in sentence-aligned chunks of ≤ 900 characters (~60 s), a clip ≥ 90 s fails, and the
+batch flags any 12-word window faster than 6.5 words/s (the aligner crams words a cut-off clip
+lost into its last second, which the whole-frame rate hides).
+
+**Delivery tags (opt-in `DRAMA3_TAGS=1`).** Drama 3 reads inline controls it never speaks.
+Inline tags lift math narration audibly; a style prefix or director's note sounds mannered, so
+`scripts/utils/drama3_tags.py` whitelists only `<emphasis>…</emphasis>` (1–4 words: the word the
+idea turns on), `<slow>…</slow>` (a final formula, a first definition) and `[pause]`. A subagent
+writes `narration_tagged` (`render_step_prompt.py tag --video-dir …` → `python -m
+scripts.utils.drama3_tags apply <dir> <resp>`; the gate keeps the spoken words identical to
+`narration` and tags closed before sentence-ending punctuation). TTS voices the tags and aligns
+the clean words, so timestamps, subtitles and Manim cues are unchanged; `pipeline.py` halts at a
+`tag` step when the flag is set and a script is untagged.
 
 There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
 NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for
@@ -352,6 +365,7 @@ fallback transcription — compile and subtitle must run serially.
 | `verify_math.py` | SymPy helpers for math verification |
 | `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps — ElevenLabs (default), `--profile cartesia` / `heygen` / `drama3` |
 | `tts_drama3_batch.py` | Drama 3: voice many videos/lectures in ONE Modal GPU session (the cheap way) |
+| `utils/drama3_tags.py` | Drama 3 delivery tags: whitelist + word-identity gate, tagging prompt, `apply` / `check` |
 | `drama3_modal.py` | Drama 3 on Modal: image, warm server + forced aligner, `Session`; `download` once |
 | `fix_tts_sentence.py` | Zero-shift sentence-swap TTS fix (edit source → run → recompile) |
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |

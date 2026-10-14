@@ -1212,6 +1212,25 @@ def step_manim(args: argparse.Namespace) -> None:
 # -----------------------------------------------------------------------------
 
 
+def step_tag(args: argparse.Namespace) -> None:
+    """Drama 3 delivery tags for an approved math/technical script (TTS_PROVIDER=drama3, opt-in):
+    {"frames": {n: tagged}} → scripts.utils.drama3_tags apply → script.json narration_tagged."""
+    from scripts.utils.drama3_tags import TAG_SYSTEM, build_tag_prompt
+    video_dir = Path(args.video_dir)
+    if not (video_dir / "script.json").exists():
+        raise SystemExit(f"No script.json in {video_dir}")
+    resp = video_dir / "narration_tags.json"
+    notes = (
+        f"Drama 3 delivery tags (inline only: <emphasis>, <slow>, [pause]). Save the bare JSON "
+        f"response to {resp}, then `venv/bin/python -m scripts.utils.drama3_tags apply {video_dir} "
+        f"{resp}` — it rejects any change to words or punctuation and any control outside the "
+        "whitelist, and writes `narration_tagged` into script.json. Then voice (tts_drama3_batch.py, "
+        "or `pipeline.py video … --from tts --to tts`). If `narration` is edited later, re-tag those "
+        "frames (the TTS step halts on a mismatch)."
+    )
+    emit(TAG_SYSTEM, build_tag_prompt(video_dir), notes, pretty=args.pretty)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="step", required=True)
@@ -1281,6 +1300,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--video-dir", required=True)
     add_common(sp)
     sp.set_defaults(func=step_color_plan)
+
+    sp = sub.add_parser("tag", help="Drama 3 delivery-tag prompt for an approved math/technical "
+                        "script (→ script.json narration_tagged via scripts.utils.drama3_tags apply)")
+    sp.add_argument("--video-dir", required=True)
+    add_common(sp)
+    sp.set_defaults(func=step_tag)
 
     sp = sub.add_parser(
         "manim",

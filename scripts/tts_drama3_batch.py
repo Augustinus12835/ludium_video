@@ -26,6 +26,8 @@ import scripts.generate_tts_elevenlabs as tts
 from scripts.utils.narration_check import scan_video_narration, format_report
 
 RATE_RANGE = (1.5, 3.8)   # words per second outside this = listen to the frame
+CRAM_WINDOW, CRAM_RATE = 12, 6.5   # 12 words faster than this = truncated clip (8.9–13 w/s seen
+                                   # on truncated frames; natural speech peaks ~4.8)
 
 
 def video_dirs(paths):
@@ -61,17 +63,31 @@ def main():
         script = vd / "script.md"
         frames = tts.parse_script(str(script))
         math_data = tts.load_math_verification(str(vd))
+        raw = json.loads((vd / "script.json").read_text()) if (vd / "script.json").exists() else {}
+        tagged_map = {f.get("number"): f["narration_tagged"] for f in raw.get("frames", [])
+                      if f.get("narration_tagged")} if raw.get("narration_tags") == "drama3" else {}
+        if os.getenv("DRAMA3_TAGS") and len(tagged_map) < len(raw.get("frames", [])):
+            print(f"  ✗ {vd}: DRAMA3_TAGS is set but the script is not tagged — "
+                  f"render_step_prompt.py tag --video-dir {vd}")
+            blocked.append(vd); continue
         pending = [f for f in frames if not (audio / f"frame_{f.number}.mp3").exists()]
         if pending:
-            plan.append((vd, frames, math_data, pending))
+            plan.append((vd, frames, math_data, pending, tagged_map))
 
     if not plan:
         print("Nothing to voice." + (f" {len(blocked)} video(s) blocked by the narration gate." if blocked else ""))
         sys.exit(1 if blocked else 0)
-    texts = [tts.clean_narration_text(tts.get_natural_narration(f.number, f.text, md))
-             for _, _, md, pend in plan for f in pend]
+    texts = []
+    for _, _, md, pend, tm in plan:
+        for f in pend:
+            try:
+                texts.append(tts.drama3_spoken(f.number, tts.clean_narration_text(
+                    tts.get_natural_narration(f.number, f.text, md)), tm))
+            except RuntimeError as e:
+                print(f"  ✗ {e}")
+    tagged_videos = sum(1 for p in plan if p[4])
     words = sum(len(t.split()) for t in texts)
-    print(f"Drama 3 batch: {len(plan)} video(s), {len(texts)} frames, {words:,} words "
+    print(f"Drama 3 batch: {len(plan)} video(s) ({tagged_videos} tagged), {len(texts)} frames, {words:,} words "
           f"(~{words / 150:.0f} min of narration)")
 
     failed = 0
@@ -79,16 +95,16 @@ def main():
         tts._DRAMA3['session'] = sess
         for t, e in tts.drama3_prefetch(texts).items():
             print(f"  ✗ Drama 3 failed: {e} — {t[:60]}...")
-        for vd, frames, math_data, _ in plan:
-            print(f"\n=== {vd}")
-            results = tts.generate_audio_for_frames(frames, str(vd / "audio"), math_data)
+        for vd, frames, math_data, _, tm in plan:
+            print(f"\n=== {vd}" + (" (Drama 3 delivery tags)" if tm else ""))
+            results = tts.generate_audio_for_frames(frames, str(vd / "audio"), math_data, tagged_map=tm)
             tts.print_report(results)
             failed += sum(r["status"] == "failed" for r in results)
         tts._DRAMA3['session'] = None
 
     print("\nSpeaking-rate check (a skipped or doubled sentence shows up here):")
     flags = 0
-    for vd, frames, _, pend in plan:
+    for vd, frames, _, pend, _ in plan:
         for f in pend:
             ts = vd / "audio" / f"frame_{f.number}_timestamps.json"
             if not ts.exists():
@@ -99,6 +115,14 @@ def main():
             if not RATE_RANGE[0] <= rate <= RATE_RANGE[1]:
                 flags += 1
                 print(f"  ⚠ {vd.parent.name}/{vd.name} frame {f.number}: {rate:.2f} words/s — listen to it")
+            # Dropped audio hides from the whole-frame rate: the aligner crams the missing words into
+            # the last fraction of a second. Natural speech peaks ~5 words/s over 12 words.
+            peak = max((CRAM_WINDOW / max(0.01, w[i + CRAM_WINDOW - 1]["end"] - w[i]["start"]), w[i]["start"])
+                       for i in range(len(w) - CRAM_WINDOW + 1)) if len(w) >= CRAM_WINDOW else (0, 0)
+            if peak[0] > CRAM_RATE:
+                flags += 1
+                print(f"  ✗ {vd.parent.name}/{vd.name} frame {f.number}: {peak[0]:.1f} words/s at "
+                      f"{peak[1]:.0f}s — words crammed, audio likely CUT OFF there; re-voice the frame")
     print(f"  {flags} frame(s) flagged" if flags else "  all frames in range")
     if blocked:
         print(f"\n✗ {len(blocked)} video(s) blocked by the narration gate: " + ", ".join(map(str, blocked)))

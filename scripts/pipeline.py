@@ -988,6 +988,27 @@ def run_video_step(step: str, video_dir: Path, lecture_dir: Path,
             voiced.discard(None)
             if len(voiced) == 1 and voiced != {"elevenlabs"}:
                 args.extend(["--profile", voiced.pop()])
+        if os.getenv("DRAMA3_TAGS") and (os.getenv("TTS_PROVIDER", "").lower() == "drama3"
+                                         or "drama3" in args):
+            # OPT-IN (DRAMA3_TAGS=1): Drama 3 inline delivery controls in narration_tagged
+            # (scripts/utils/drama3_tags.py) — a subagent step between the approved script and TTS.
+            sys.path.insert(0, str(SCRIPTS_DIR.parent))
+            from scripts.utils.drama3_tags import check_video as d3_check
+            sj = json.loads((video_dir / "script.json").read_text())
+            if sj.get("narration_tags") != "drama3" or not all(f.get("narration_tagged")
+                                                                 for f in sj.get("frames", [])):
+                return subagent_step_error(
+                    "tag", f"tag --video-dir {video_dir} (save narration_tags.json, then "
+                    f"venv/bin/python -m scripts.utils.drama3_tags apply {video_dir} "
+                    f"{video_dir}/narration_tags.json)")
+            bad = d3_check(video_dir)
+            if bad:
+                for n, probs in bad.items():
+                    for pr in probs:
+                        print(f"{Colors.RED}  frame {n}: {pr}{Colors.RESET}")
+                print(f"{Colors.RED}  narration_tagged no longer matches narration — re-tag those "
+                      f"frames and re-apply.{Colors.RESET}")
+                return False
         return run_script("generate_tts_elevenlabs.py", args)
 
     elif step == "animate":

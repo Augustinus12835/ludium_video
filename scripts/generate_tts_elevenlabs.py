@@ -165,6 +165,33 @@ def drama3_prefetch(texts):
     return {todo[i]: e for i, e in errs.items()}
 
 
+def drama3_spoken(number, clean, tagged_map):
+    """What Drama 3 is sent for a frame: its narration_tagged (inline delivery controls,
+    scripts/utils/drama3_tags.py) when present, else the clean narration. A tagged copy that
+    no longer matches the narration raises — re-tag the frame."""
+    tagged = (tagged_map or {}).get(number)
+    if not tagged:
+        return clean
+    from scripts.utils.drama3_tags import validate_frame
+    probs = validate_frame(clean, tagged)
+    if probs:
+        raise RuntimeError(f"frame {number} narration_tagged: " + "; ".join(probs)
+                           + " (re-tag: render_step_prompt.py tag)")
+    return " ".join(tagged.split())
+
+
+def load_tagged_map(script_dir) -> Dict[int, str]:
+    """{frame: narration_tagged} when script.json carries Drama 3 tags, else {}."""
+    p = Path(script_dir) / 'script.json'
+    try:
+        raw = json.loads(p.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if raw.get('narration_tags') != 'drama3':
+        return {}
+    return {f.get('number'): f['narration_tagged'] for f in raw.get('frames', []) if f.get('narration_tagged')}
+
+
 def call_drama3_api(text):
     """(mp3 bytes at 44.1 kHz / 192k, word timestamps) — the call_elevenlabs_api shape."""
     if text not in _DRAMA3['cache']:
@@ -568,7 +595,8 @@ def get_audio_duration(file_path):
         return None
 
 
-def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data: Optional[Dict] = None):
+def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data: Optional[Dict] = None,
+                              tagged_map: Optional[Dict[int, str]] = None):
     """
     Generate audio files for all frames
 
@@ -616,8 +644,15 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
 
     if PROVIDER == 'drama3':
         # One GPU batch for every pending frame (the per-frame calls below hit the cache).
-        pending = [clean_narration_text(get_natural_narration(f.number, f.text, math_data)) for f in frames
-                   if not os.path.exists(os.path.join(output_dir, f"frame_{f.number}.mp3"))]
+        pending = []
+        for f in frames:
+            if os.path.exists(os.path.join(output_dir, f"frame_{f.number}.mp3")):
+                continue
+            try:
+                pending.append(drama3_spoken(f.number, clean_narration_text(
+                    get_natural_narration(f.number, f.text, math_data)), tagged_map))
+            except RuntimeError as e:
+                print(f"  [drama3] {e}")      # the frame fails in the loop below
         for t, e in drama3_prefetch(pending).items():
             print(f"  [drama3] failed: {e} — {t[:60]}...")
 
@@ -655,7 +690,9 @@ def generate_audio_for_frames(frames: List[TTSFrame], output_dir: str, math_data
 
         try:
             # Generate audio (word timestamps come back with the same call)
-            audio_data, word_timestamps = call_elevenlabs_api(frame.text)
+            # Drama 3 voices narration_tagged (inline delivery controls); timestamps keep frame.text
+            spoken = drama3_spoken(frame.number, frame.text, tagged_map) if PROVIDER == 'drama3' else frame.text
+            audio_data, word_timestamps = call_elevenlabs_api(spoken)
 
             # Save to file
             with open(output_path, 'wb') as f:
@@ -840,7 +877,7 @@ def main():
             print(f"✓ Math verification available ({verified_count} frames)")
 
         # Generate audio
-        results = generate_audio_for_frames(frames, audio_dir, math_data)
+        results = generate_audio_for_frames(frames, audio_dir, math_data, load_tagged_map(script_dir))
 
         # Print report
         print_report(results)

@@ -100,6 +100,20 @@ def _norm(s):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def _tagged_sentence(sf, sent):
+    """Drama 3 videos with delivery tags: the sentence as voiced, i.e. with its controls from
+    narration_tagged (the aligner returns only the spoken words). Otherwise `sent` as-is."""
+    if _tts.PROVIDER != 'drama3' or not sf or not sf.get("narration_tagged"):
+        return sent
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from drama3_modal import spoken_text
+    for ts in text_sentences(sf["narration_tagged"]):
+        if _norm(spoken_text(ts)) == _norm(sent):
+            return ts
+    print(f"      (no tagged match — re-tag this frame; voicing untagged) {sent[:60]!r}")
+    return sent
+
+
 # ---------- core ----------
 def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=False,
               voice_id=None, resay=None):
@@ -180,7 +194,8 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
         lead_n = max(0, int(round((sp_start - rs) * SR)))
         speech_n = max(1, int(round((sp_end - sp_start) * SR)))
 
-        regen_bytes, regen_words = call_elevenlabs_api(new_sent, voice_id=voice_id)
+        regen_bytes, regen_words = call_elevenlabs_api(_tagged_sentence(script_frames.get(frame), new_sent),
+                                                       voice_id=voice_id)
         npcm = decode(data=regen_bytes)
         # trim the regen's own lead/trail silence using its word timestamps -> pure speech
         if regen_words:

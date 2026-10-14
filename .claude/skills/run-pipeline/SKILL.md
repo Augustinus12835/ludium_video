@@ -89,6 +89,11 @@ provider's `*_VOICE_ID`) — pass no `--voice-id`/`--profile`.
   and re-run; voiced frames are skipped), voices every pending frame in one session, writes
   `audio/` as the per-video TTS would, and flags frames whose speaking rate looks wrong (listen
   to those). Then spawn the producers; their `--from tts` slice finds the audio done.
+- **Delivery tags (opt-in, `DRAMA3_TAGS=1`):** before the batch, one clean-context subagent per
+  video tags the approved script — `render_step_prompt.py tag --video-dir pipeline/<L>/Video-N`,
+  response → `Video-N/narration_tags.json`, then `venv/bin/python -m scripts.utils.drama3_tags
+  apply <dir> <dir>/narration_tags.json` (rejects any word change or a control outside the
+  whitelist). The batch then voices the tags.
 
 A fresh agent per video keeps each context focused. Run multi-video sources in parallel
 batches of ~3 (4K renders are CPU-heavy); B1 agents may also run in parallel, and each video's
