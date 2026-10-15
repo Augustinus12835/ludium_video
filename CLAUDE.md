@@ -325,11 +325,20 @@ scripts.utils.drama3_tags apply <dir> <resp>`; the gate keeps the spoken words i
 the clean words, so timestamps, subtitles and Manim cues are unchanged; `pipeline.py` halts at a
 `tag` step when the flag is set and a script is untagged.
 
-**House style.** Every Drama 3 request is prefixed with one fixed line-level direction,
-`[a calm, engaged lecturer working through the algebra at the board]` — with inline tags it read
-best in A/B tests, whereas per-frame styles written by the tagger sounded mannered (the tag gate
-still rejects authored prefixes). `DRAMA3_STYLE` in `.env` overrides it (empty = off); it is
-recorded per video in `tts_meta.json` `"style"`, so a video keeps the style it was voiced with.
+**House style: off by default.** `DRAMA3_STYLE` in `.env` prefixes every Drama 3 request with one
+fixed line-level direction (e.g. `[a calm, engaged lecturer working through the algebra at the
+board]`). Next to videos voiced with inline tags only it sounded a tad flat, so the default is no
+prefix; per-frame styles written by the tagger sounded mannered (the tag gate still rejects authored
+prefixes). The style is recorded per video in `tts_meta.json` `"style"`, so a video keeps the style
+it was voiced with.
+
+**Clip QA.** Drama 3 sometimes ends a clip mid-word or goes silent part-way through a frame, and
+forced alignment still places every word, so the timestamps hide it. `drama3_modal.check_clip`
+compares each chunk with what the aligner's CTC model *hears* (greedy decode, no language model;
+Whisper-style ASR autocompletes a cut "oth–" to "other"), plus silence runs >= 3 s and an end at
+full volume. A failed chunk is re-voiced in the same container, up to 3 more takes, and then the
+frame fails. `fix_tts_sentence.py` keeps a re-voiced word's decay (a CTC end time sits inside the
+final phoneme), and a frame's last sentence may grow the clip by ~0.15 s.
 
 There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
 NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for

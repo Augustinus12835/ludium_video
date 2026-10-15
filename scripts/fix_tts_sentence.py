@@ -78,6 +78,23 @@ def xfade(a, b, n=int(0.008 * SR)):
 
 
 # ---------- sentence segmentation ----------
+FINAL_TAIL_SECONDS = 0.15   # silence kept after a frame's last word when its sentence is swapped
+
+
+def speech_decay_end(pcm, t_end, limit=0.4):
+    """First moment after t_end (s) where the sound has decayed 40 dB under the clip's loudest
+    100 ms, capped at t_end + limit and the clip end."""
+    w = int(0.01 * SR)
+    peak = np.sqrt(np.convolve(pcm.astype(np.float64) ** 2, np.ones(10 * w) / (10 * w), "valid").max()) \
+        if len(pcm) > 10 * w else 0.0
+    i, stop = int(t_end * SR), min(len(pcm), int((t_end + limit) * SR))
+    while i + w <= stop:
+        if np.sqrt((pcm[i:i + w].astype(np.float64) ** 2).mean()) < peak * 0.01:
+            return i / SR
+        i += w
+    return stop / SR
+
+
 def word_sentences(words):
     """Yield (start_idx, end_idx_inclusive) ranges; a sentence ends on a word ending in .!?"""
     start = 0
@@ -186,7 +203,9 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
     for i, s, e, new_sent in sorted(changed, key=lambda x: -x[1]):
         # region = silence-midpoint before .. silence-midpoint after (seams land in silence)
         rs = (words[s - 1]["end"] + words[s]["start"]) / 2 if s > 0 else max(0.0, words[s]["start"] - 0.12)
-        re_ = (words[e]["end"] + words[e + 1]["start"]) / 2 if e + 1 < len(words) else min(total, words[e]["end"] + 0.20)
+        # a frame's last sentence takes the clip to its end, so nothing of the old take (a cut-off
+        # breath or click after the last word) survives the swap
+        re_ = (words[e]["end"] + words[e + 1]["start"]) / 2 if e + 1 < len(words) else total
         s0, s1 = int(round(rs * SR)), int(round(re_ * SR))
         region_n = s1 - s0
         # ORIGINAL speech span inside the region (the rest is lead/trail pause we must keep)
@@ -197,10 +216,12 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
         regen_bytes, regen_words = call_elevenlabs_api(_tagged_sentence(script_frames.get(frame), new_sent),
                                                        voice_id=voice_id)
         npcm = decode(data=regen_bytes)
-        # trim the regen's own lead/trail silence using its word timestamps -> pure speech
+        # trim the regen's own lead/trail silence using its word timestamps -> pure speech; the
+        # cut after the last word waits for its sound to decay (a CTC aligner such as Drama 3's
+        # ends a word inside its final phoneme, and cutting there clips it audibly)
         if regen_words:
             r0 = max(0.0, regen_words[0]["start"])
-            r1 = min(len(npcm) / SR, regen_words[-1]["end"])
+            r1 = speech_decay_end(npcm, min(len(npcm) / SR, regen_words[-1]["end"]))
         else:
             r0, r1 = 0.0, len(npcm) / SR
         regen_speech = npcm[int(r0 * SR):int(r1 * SR)]
@@ -217,10 +238,15 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
             fitted_speech = atempo_fit(regen_speech, speech_n)     # speech-to-speech stretch (gentle)
         place_n = len(fitted_speech)
         trail_n = max(0, region_n - lead_n - place_n)
+        # The frame's LAST sentence may grow the clip a little: its span can end at a cut-off
+        # clip end (a TTS take that stopped mid-word), and nothing follows it to shift.
+        if e + 1 == len(words):
+            trail_n = max(trail_n, int(FINAL_TAIL_SECONDS * SR))
         content = np.concatenate([np.zeros(lead_n, np.float32), fitted_speech,
                                   np.zeros(trail_n, np.float32)])
-        content = content[:region_n] if len(content) >= region_n else \
-            np.concatenate([content, np.zeros(region_n - len(content), np.float32)])
+        if e + 1 < len(words) or len(content) < region_n:
+            content = content[:region_n] if len(content) >= region_n else \
+                np.concatenate([content, np.zeros(region_n - len(content), np.float32)])
         out = xfade(xfade(out[:s0], content), out[s1:])
 
         # rebuild word timestamps, mapped onto the span actually occupied by the placed speech

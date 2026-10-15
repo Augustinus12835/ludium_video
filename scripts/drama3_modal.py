@@ -46,6 +46,17 @@ MAX_CHUNK_CHARS = 900     # longer frames are voiced and aligned in sentence-ali
                           # lost the tail of long frames in production; 900 ≈ 60 s.
 MAX_CLIP_SECONDS = 90.0   # a chunk this long has probably hit that cap — fail it, never ship it
 GAP_SECONDS = 0.25        # silence between chunks of one frame
+# Clip QA. Drama 3 sometimes stops a clip mid-word ("tangent to each oth–") or goes silent part-way
+# and pads the rest with near-silence (one 62 s frame spoke only its first 21 s). Forced alignment
+# places every token whatever the audio holds, so the timestamps cannot show either. Each chunk is
+# therefore checked against what the aligner's own CTC model HEARS (greedy decode, no language
+# model — Whisper-style ASR autocompletes a cut "oth–" to "other") and against its loudness, and a
+# failed chunk is re-requested in the same warm container.
+QA_RETRIES = 3            # extra takes per failing chunk before the frame fails
+QA_TAIL_CHARS = 3         # script letters after the last thing heard -> the clip ended early
+QA_GAP_CHARS = 25         # a run of script letters this long never heard -> words dropped
+QA_SILENCE_SECONDS = 3.0  # a stretch this long 35 dB under the speech level -> dropout
+QA_END_CUT_DB = -32.0     # last 30 ms this close to the loudest 100 ms -> cut mid-sound
 
 image = (
     modal.Image.from_registry(BASE)
@@ -102,7 +113,82 @@ def _chunks(text, limit=MAX_CHUNK_CHARS):
     return [head + c for c in (out + [cur] if cur else out)]
 
 
-def _align(model, processor, audio16k, words):
+def _emission(model, processor, audio16k):
+    """Per-frame CTC log-probabilities of 16 kHz audio (T x vocab, on the CPU)."""
+    import torch
+    with torch.inference_mode():
+        dev, dt = next(model.parameters()).device, next(model.parameters()).dtype
+        x = processor(audio16k, sampling_rate=16000, return_tensors="pt").input_values.to(dev, dt)
+        return torch.log_softmax(model(x).logits[0].float(), dim=-1).cpu()
+
+
+def heard_text(processor, emission):
+    """Greedy CTC decode: what the acoustic model hears, with no language model to fill gaps."""
+    ids = emission.argmax(-1).tolist()
+    blank = processor.tokenizer.get_vocab()["<pad>"]
+    toks = processor.tokenizer.convert_ids_to_tokens(
+        [i for k, i in enumerate(ids) if i != blank and (k == 0 or i != ids[k - 1])])
+    return " ".join("".join(toks).replace("|", " ").split())
+
+
+def _letters(text):
+    return re.sub(r"[^A-Z']", "", text.upper())
+
+
+def check_clip(audio16k, words, heard):
+    """Problems with one voiced chunk ([] = fine). audio16k: float mono 16 kHz; words: the chunk's
+    spoken tokens; heard: heard_text() of the same audio. Pure numpy + difflib (also run locally)."""
+    import difflib
+    import numpy as np
+    probs = []
+    exp, got = _letters(" ".join(words)), _letters(heard)
+    if exp:
+        covered = np.zeros(len(exp), bool)
+        sm = difflib.SequenceMatcher(None, exp, got, autojunk=False)
+        got_end = 0                               # end of the last real match in what was heard
+        for b in sm.get_matching_blocks():
+            if b.size >= 3:                       # 1-2 letter "matches" are coincidence
+                covered[b.a:b.a + b.size] = True
+                got_end = b.b + b.size
+        owner = [wi for wi, w in enumerate(words) for _ in _letters(w)]
+        hit = np.flatnonzero(covered)
+        tail = len(exp) - (hit[-1] + 1 if len(hit) else 0)
+        # A misheard last word ("theta" -> SATA, "phi" -> FI) still leaves letters after the last
+        # match; a clip that stopped early leaves (almost) none ("…EACH" for "each other").
+        if tail >= QA_TAIL_CHARS and len(got) - got_end < tail / 2:
+            probs.append("ends early — not heard: " + repr(" ".join(words[owner[len(exp) - tail]:])[-80:]))
+        run, start = 0, 0
+        for i, c in enumerate(covered[:len(exp) - tail] if tail else covered):
+            if not c:
+                if run == 0:
+                    start = i
+                run += 1
+                if run == QA_GAP_CHARS:
+                    probs.append("words not heard: " + repr(" ".join(words[owner[start]:owner[start] + 8])[:80] + "…"))
+            else:
+                run = 0
+    a = np.asarray(audio16k, dtype=np.float64)
+    nz = np.flatnonzero(np.abs(a) > 1e-4)
+    if len(nz) > 4800:
+        a = a[:nz[-1] + 1]
+        w = 160                                   # 10 ms frames
+        n = len(a) // w
+        db = 20 * np.log10(np.sqrt((a[:n * w].reshape(n, w) ** 2).mean(1)) + 1e-9)
+        quiet = db < np.percentile(db, 95) - 35
+        longest = run = 0
+        for q in quiet:
+            run = run + 1 if q else 0
+            longest = max(longest, run)
+        if longest * 0.01 >= QA_SILENCE_SECONDS:
+            probs.append(f"{longest * 0.01:.1f} s of silence inside the clip")
+        peak = 10 * np.log10(np.convolve(a ** 2, np.ones(1600) / 1600, "valid").max() + 1e-18)
+        end = 10 * np.log10((a[-480:] ** 2).mean() + 1e-18)
+        if end - peak > QA_END_CUT_DB:
+            probs.append(f"cut off mid-sound (last 30 ms at {end - peak:.0f} dB of peak)")
+    return probs
+
+
+def _align(model, processor, audio16k, words, emission=None):
     """CTC forced alignment of `words` (whitespace tokens) onto 16 kHz audio -> [(start, end)]."""
     import torch
     vocab = processor.tokenizer.get_vocab()
@@ -114,9 +200,8 @@ def _align(model, processor, audio16k, words):
             tokens.append(sep); owner.append(-1)
         for c in letters:
             tokens.append(vocab[c]); owner.append(wi)
-    with torch.inference_mode():
-        x = processor(audio16k, sampling_rate=16000, return_tensors="pt").input_values.to("cuda").half()
-        emission = torch.log_softmax(model(x).logits[0].float(), dim=-1).cpu()
+    if emission is None:
+        emission = _emission(model, processor, audio16k)
     T, J = emission.shape[0], len(tokens)
     # Viterbi trellis (torchaudio forced-alignment tutorial formulation)
     trellis = torch.full((T + 1, J + 1), -float("inf"))
@@ -197,19 +282,37 @@ class Drama3:
 
         audio = {}
         t0 = time.time()
+        pending, takes = jobs, 0
         with cf.ThreadPoolExecutor(CONCURRENCY) as ex:
-            for (key, ci, chunk), r in ex.map(one, jobs):
-                if r.status_code != 200:
-                    audio[(key, ci)] = RuntimeError(f"{r.status_code} {r.text[:1000]}")
-                    continue
-                pcm, sr = sf.read(io.BytesIO(r.content), dtype="float32")
-                if len(pcm) / sr >= MAX_CLIP_SECONDS:
-                    audio[(key, ci)] = RuntimeError(
-                        f"clip is {len(pcm) / sr:.0f} s — likely cut off at Drama 3's ~95 s cap "
-                        f"({len(chunk)} chars); lower MAX_CHUNK_CHARS")
-                    continue
-                audio[(key, ci)] = (pcm.mean(1) if pcm.ndim > 1 else pcm, sr, chunk)
-        print(f"voiced {len(jobs)} chunks in {time.time() - t0:.0f}s", flush=True)
+            while pending:
+                takes += 1
+                retry = []
+                for job, r in ex.map(one, pending):
+                    key, ci, chunk = job
+                    if r.status_code != 200:
+                        audio[(key, ci)] = RuntimeError(f"{r.status_code} {r.text[:1000]}")
+                        continue
+                    pcm, sr = sf.read(io.BytesIO(r.content), dtype="float32")
+                    if len(pcm) / sr >= MAX_CLIP_SECONDS:
+                        audio[(key, ci)] = RuntimeError(
+                            f"clip is {len(pcm) / sr:.0f} s — likely cut off at Drama 3's ~95 s cap "
+                            f"({len(chunk)} chars); lower MAX_CHUNK_CHARS")
+                        continue
+                    pcm = pcm.mean(1) if pcm.ndim > 1 else pcm
+                    a16 = librosa.resample(pcm, orig_sr=sr, target_sr=16000)
+                    toks = spoken_text(chunk).split()
+                    em = _emission(self.aligner, self.processor, a16)
+                    probs = check_clip(a16, toks, heard_text(self.processor, em))
+                    if probs and takes <= QA_RETRIES:
+                        print(f"  QA take {takes} of {key}#{ci}: {'; '.join(probs)} — re-voicing", flush=True)
+                        retry.append(job)
+                    elif probs:
+                        audio[(key, ci)] = RuntimeError(
+                            f"failed clip QA on {takes} takes: {'; '.join(probs)} — {chunk[:60]!r}")
+                    else:
+                        audio[(key, ci)] = (pcm, sr, chunk, _align(self.aligner, self.processor, a16, toks, em))
+                pending = retry
+        print(f"voiced {len(jobs)} chunks in {time.time() - t0:.0f}s ({takes} round(s))", flush=True)
         out = []
         for key, text in items:
             parts = [audio[(k, ci)] for (k, ci, _) in jobs if k == key]
@@ -219,11 +322,10 @@ class Drama3:
             sr = parts[0][1]
             gap = np.zeros(int(GAP_SECONDS * sr), dtype=np.float32)
             pcm, words, offset = [], [], 0.0
-            for i, (p, _, chunk) in enumerate(parts):
+            for i, (p, _, chunk, spans) in enumerate(parts):
                 if i:
                     pcm.append(gap); offset += GAP_SECONDS
                 toks = spoken_text(chunk).split()
-                spans = _align(self.aligner, self.processor, librosa.resample(p, orig_sr=sr, target_sr=16000), toks)
                 words += [{"word": w, "start": round(s + offset, 3), "end": round(e + offset, 3)}
                           for w, (s, e) in zip(toks, spans)]
                 pcm.append(p); offset += len(p) / sr

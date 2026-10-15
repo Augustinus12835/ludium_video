@@ -132,13 +132,13 @@ def check_provider_config() -> None:
 # Drama 3 (open weights on Modal): one warm container per process; frames are voiced in batches
 # (drama3_prefetch) and served to the per-frame calls from a cache.
 _DRAMA3 = {'session': None, 'cache': {}, 'style': ''}
-# House style: ONE fixed line-level direction on every Drama 3 request. In A/B tests on math
-# narration, this calm-lecturer prefix plus inline tags read best, while per-frame styles written
-# by the tagger sounded mannered (so the tag gate still rejects authored prefixes). Recorded in
-# tts_meta.json "style": a video keeps the style it was voiced with, so resumes and sentence fixes
-# match. DRAMA3_STYLE in .env overrides it; DRAMA3_STYLE= (empty) turns it off.
-DRAMA3_STYLE = os.getenv('DRAMA3_STYLE',
-                         '[a calm, engaged lecturer working through the algebra at the board]').strip()
+# House style: OFF by default. A fixed line-level direction such as `[a calm, engaged lecturer
+# working through the algebra at the board]` can prefix every Drama 3 request; next to videos
+# voiced with inline tags only, it made the delivery a tad flat, so DRAMA3_STYLE in .env enables
+# one when wanted. Per-frame styles written by the tagger sounded mannered (the tag gate still
+# rejects authored prefixes). Recorded in tts_meta.json "style": a video keeps the style it was
+# voiced with, so resumes and sentence fixes match.
+DRAMA3_STYLE = os.getenv('DRAMA3_STYLE', '').strip()
 
 
 def drama3_video_style(audio_dir) -> str:

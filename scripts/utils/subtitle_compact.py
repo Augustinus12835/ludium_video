@@ -553,7 +553,7 @@ _COMBINING_CIRCUMFLEX = '\u0302'
 # Corpus: M-G 105, M-V 8, M-A 2.
 _CONVENTIONAL_PRODUCTS = {('M', 'G'): 'mg', ('M', 'V'): 'mv', ('M', 'A'): 'ma'}
 
-_TRIG_NAMES = {'sine': 'sin', 'cosine': 'cos', 'tangent': 'tan'}
+_TRIG_NAMES = {'sine': 'sin', 'cosine': 'cos', 'tangent': 'tan', 'secant': 'sec'}
 
 
 def _hat_form(letter: str) -> str:
@@ -590,6 +590,22 @@ def _pass_space_powers(toks: List[_Tok], letters: frozenset) -> None:
             continue
         t.core = parts[0] + ''.join(_SUP_MAP[c] for c in str(val * mult))
         t.mathy = True
+
+
+def _pass_letter_size(toks: List[_Tok]) -> None:
+    """"little A" -> a, "big A" -> A (also "little X-N" -> x-N). Narration names a letter's case
+    when one lecture uses both (side a vs area A, r vs R) — and must write the side's letter
+    uppercase, or the voice reads it as the article. Corpus 2026-10-15: little A/R/X/Y, big A/G/O."""
+    i = 0
+    while i < len(toks) - 1:
+        t, nxt = toks[i], toks[i + 1]
+        size = t.core.lower()
+        head = _hyphen_parts(nxt.core)[0] if nxt.core else ''
+        if size in ('little', 'big') and not t.trail and not nxt.lead and not t.mathy \
+                and _is_single_letter(head) and head.isupper():
+            letter = head.lower() if size == 'little' else head
+            _merge(toks, i, i + 2, letter + nxt.core[1:], mathy=True)
+        i += 1
 
 
 def _pass_math_tokens(toks: List[_Tok]) -> None:
@@ -662,6 +678,11 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
         if low == 'partial' and _is_single_letter(nxt.core) and not t.mathy:
             _merge(toks, i, i + 2, '∂' + nxt.core)
             continue
+        # "partial theta" -> ∂θ (the denominator of "partial A over partial theta")
+        if low == 'partial' and nxt.core.lower() in _GREEK and \
+                _GREEK[nxt.core.lower()] != 'Δ' and not t.mathy:
+            _merge(toks, i, i + 2, '∂' + _GREEK[nxt.core.lower()])
+            continue
         i += 1
 
     # 3) standalone greek names -> symbols
@@ -685,6 +706,10 @@ def _pass_trig(toks: List[_Tok]) -> None:
             i += 1
             continue
         j = i + 1
+        power = ''
+        # "secant squared theta" -> "sec² θ"
+        if toks[j].core.lower() == 'squared' and not toks[j].trail and j + 1 < len(toks):
+            power, j = '²', j + 1
         if toks[j].core.lower() == 'of' and j + 1 < len(toks):
             j += 1
         arg = toks[j]
@@ -696,7 +721,7 @@ def _pass_trig(toks: List[_Tok]) -> None:
             t.core, t.mathy = name, True    # leave the argument its own timing
             i = j + 1
         else:
-            _merge(toks, i, j + 1, name + ' ' + arg.core)
+            _merge(toks, i, j + 1, name + power + ' ' + arg.core)
             i += 1
 
 
@@ -955,14 +980,19 @@ _DECADE_WORDS = {'twenties': 2, 'thirties': 3, 'forties': 4, 'fifties': 5,
 def _pass_decades(toks: List[_Tok]) -> None:
     """A spoken decade: "eighteen twenties" reaches here as "18 twenties" (the
     number pass converts the century word alone) -> "1820s". Only a century
-    prefix 10–20 qualifies, so "the twenties" and "five sixties" stay put."""
+    prefix 10–20 qualifies, so "the twenties" and "five sixties" stay put.
+    An ancient decade, "four hundred fifties", reaches here as "400 fifties"
+    -> "450s" (whole hundreds 100–900 only)."""
     i = 0
     while i < len(toks) - 1:
         a, b = toks[i], toks[i + 1]
         tens = _DECADE_WORDS.get(b.core.lower())
-        if tens and a.core.isdigit() and 10 <= int(a.core) <= 20 and \
-                not a.trail and not b.lead:
-            _merge(toks, i, i + 2, f'{a.core}{tens}0s', mathy=False)
+        if tens and a.core.isdigit() and not a.trail and not b.lead:
+            n = int(a.core)
+            if 10 <= n <= 20:
+                _merge(toks, i, i + 2, f'{a.core}{tens}0s', mathy=False)
+            elif 100 <= n <= 900 and n % 100 == 0:
+                _merge(toks, i, i + 2, f'{n + tens * 10}s', mathy=False)
         i += 1
 
 
@@ -1010,6 +1040,7 @@ def compact_words(words: List[Dict], math_mode: bool = False,
     if math_mode:
         if space_letters:
             _pass_space_powers(toks, space_letters)
+        _pass_letter_size(toks)
         _pass_math_tokens(toks)
         _pass_trig(toks)
     _pass_phrases(toks, math_mode)
