@@ -98,7 +98,7 @@ voices you have consent to use. Check current prices at [modal.com/pricing](http
 A **lip-synced presenter from one photo** (you, a consenting colleague, or a drawn character):
 large beside the visuals in the opening hook, then in a bottom-right window. A subagent *directs*
 it, giving sentences a gesture or expression with a teaching job, and frames keep its zones clear.
-Example: [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=URoGEXfxkCs),
+Example: [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=UWV9QqnKZC8),
 presented by the anime tutor ルミ.
 
 Runs [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)

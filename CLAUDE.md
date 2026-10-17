@@ -171,7 +171,7 @@ Narration-first documentary with a Remotion "book of plates" visual track. Playb
 A lip-synced presenter made from ONE photo, for any mode (`/run-pipeline … --presenter`;
 playbook `.claude/skills/run-pipeline/references/presenter.md`). LongCat-Video-Avatar 1.5 on
 Modal (`scripts/longcat_avatar_modal.py`) renders it on chroma green; `scripts/presenter.py`
-plans, generates and keys it. Example: https://www.youtube.com/watch?v=URoGEXfxkCs (Japanese).
+plans, generates and keys it. Example: https://www.youtube.com/watch?v=UWV9QqnKZC8 (Japanese).
 
 - **Hook** = the first frame, the presenter large on the right (x ≥ 1180 px, 720p, H200);
   **wipe** = every later frame, a 380 px window bottom-right (x ≥ 1504, y ≥ 664 px), ONE 480p
