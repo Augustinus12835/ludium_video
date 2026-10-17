@@ -31,7 +31,7 @@ QA-driven fixes).
 ## Invocation
 
 ```
-/run-pipeline <source-spec> [--math | --technical | --folio]
+/run-pipeline <source-spec> [--math | --technical | --folio] [--presenter | --presenter-hook-only]
 ```
 
 `<source-spec>` is one of:
@@ -59,6 +59,11 @@ stop only if it's unparseable.
 humanities (history, philosophy, literature, religion) — a narration-first documentary with a
 Remotion "book of plates" visual track, from lectures or books like any other mode
 (references/sources.md "Humanities sources"). One is required — there is no default mode.
+
+**Presenter (opt-in, `--presenter`).** Only when the user passes it: a lip-synced presenter made
+from their photo, large in the hook and in a corner window after it (`--presenter-hook-only`:
+hook only). Playbook: [references/presenter.md](references/presenter.md). It is enabled in
+Phase A, so every frame is authored around it. Without the flag, nothing here changes.
 
 **Voice.** Narration uses the provider and voice set in `.env` (`TTS_PROVIDER` + that
 provider's `*_VOICE_ID`) — pass no `--voice-id`/`--profile`.
@@ -171,6 +176,10 @@ Skip any step whose output already exists. Book and PPTX sources arrive with
    into the scheme, even if that spends GREEN/RED_C or exceeds seven entries; a recurring
    quantity left out gets a different colour from each producer. If one must stay out, name it
    and its colour in the scheme's `scope` text.
+
+6. **Presenter (only with `--presenter` / `--presenter-hook-only`).** Before any frame is
+   authored: `venv/bin/python scripts/presenter.py enable pipeline/<L>` (add `--no-wipe` for
+   hook-only). Setup and the per-video steps: [references/presenter.md](references/presenter.md).
 
 ### Phase B (per video) — B1 scripting → review relay → B2 production
 

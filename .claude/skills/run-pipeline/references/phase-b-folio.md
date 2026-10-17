@@ -159,6 +159,14 @@ count — for those, drop `of` and generate a fresh image. Maps are grounded Gem
 their `places`/prompt instead. A manual `trim: [l, t, r, b]` (fractions of the
 raw) crops a stubborn paper margin.
 
+## Stage 3b — presenter (only when `pipeline/<L>/presenter.json` exists)
+
+Any time after the word timeline: direct the presenter and start its clips
+(references/presenter.md "Per video"). They generate on Modal while assets and scenes are made.
+The scene prompt then carries the presenter zones: during the hook keep each element and the plate's
+subject at x < 1160; after it, keep the bottom-right corner (x > 1500, y > 660) clear.
+`folio.py still` outlines the live zone in red, and captions move left automatically.
+
 ## Stage 4 — scene authors (parallel subagents)
 
 Split the scenes into contiguous ranges of ~10–15 (one agent per range, 4–8 agents per video).
@@ -277,7 +285,7 @@ Motion pitfalls:
 ## Stage 6 — compile, subtitles
 
 ```bash
-venv/bin/python scripts/folio.py compile pipeline/<L>/Video-N      # segment-wise, + narration
+venv/bin/python scripts/folio.py compile pipeline/<L>/Video-N      # segment-wise, + narration (+ presenter)
 ffprobe -v error -show_entries format=duration -of csv=p=0 pipeline/<L>/Video-N/final_video.mp4
 venv/bin/python scripts/generate_subtitles.py pipeline/<L> --video N --force
 ```

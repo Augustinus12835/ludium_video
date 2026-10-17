@@ -538,7 +538,7 @@ def generate_report(video_folder: str, frames: List[FrameData],
     return '\n'.join(report_lines)
 
 
-def compile_video(video_folder: str) -> str:
+def compile_video(video_folder: str, presenter: bool = True) -> str:
     """
     Main compilation function
 
@@ -550,9 +550,23 @@ def compile_video(video_folder: str) -> str:
 
     Note: Subtitles are generated separately using generate_subtitles.py
 
+    With the opt-in on-screen presenter (scripts/presenter.py) the presenter is keyed over the
+    compiled video in one more pass; the visuals-only cut stays as final_video_board.mp4.
+    `presenter=False` (CLI --no-presenter) compiles the visuals only, for a quick look.
+
     Returns status message
     """
     start_time = datetime.now()
+
+    from scripts.presenter import enabled as presenter_enabled, readiness, apply_to_final
+    with_presenter = presenter and presenter_enabled(video_folder)
+    if with_presenter:
+        problems = readiness(Path(video_folder))
+        if problems:
+            print("ERROR: presenter not ready: " + "; ".join(problems))
+            print(f"  → python scripts/presenter.py generate {video_folder}"
+                  "   (or compile_video.py --no-presenter for a visuals-only preview)")
+            return "ERROR: presenter not ready"
 
     print("=" * 70)
     print("LUDIUM VIDEO COMPILATION")
@@ -637,6 +651,13 @@ def compile_video(video_folder: str) -> str:
 
         print(f"      Report saved to: compilation_report.txt")
 
+        if with_presenter:
+            print("\n      Overlaying the presenter (hook + wipe)...")
+            final = Path(video_folder) / 'final_video.mp4'
+            apply_to_final(Path(video_folder), final)
+            print(f"      Presenter cut: {get_video_duration(str(final)):.0f}s "
+                  "(visuals-only cut: final_video_board.mp4)")
+
         # Print summary
         print("\n" + "=" * 70)
         print("COMPILATION COMPLETE")
@@ -668,7 +689,7 @@ def compile_video(video_folder: str) -> str:
 def main():
     """Main entry point"""
     if len(sys.argv) < 2:
-        print("Usage: python3 compile_video.py Week-N/Video-M")
+        print("Usage: python3 compile_video.py Week-N/Video-M [--no-presenter]")
         print("\nExample: python3 compile_video.py Week-1/Video-1")
         sys.exit(1)
 
@@ -683,7 +704,7 @@ def main():
         print(f"Error: Video folder not found: {video_folder}")
         sys.exit(1)
 
-    result = compile_video(video_folder)
+    result = compile_video(video_folder, presenter='--no-presenter' not in sys.argv[2:])
 
     if result == "SUCCESS":
         sys.exit(0)

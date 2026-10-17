@@ -59,6 +59,7 @@ from PIL import Image
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from scripts.utils.subtitle_compact import compact_words  # noqa: E402
+from scripts import presenter  # noqa: E402  (the optional on-screen presenter)
 from scripts.utils.ffmpeg_compile import (  # noqa: E402
     build_audio_track, clip_segment_cmd, concat_mux, encode_segments)
 
@@ -953,6 +954,8 @@ def cmd_prompt(a) -> int:
                      + "".join(f"- {o.get('what', '')}" + (f" — {o['why']}" if o.get("why") else "")
                                + (f" (terms: {', '.join(o['terms'])})" if o.get("terms") else "") + "\n"
                                for o in off))
+        if presenter.enabled(vd):
+            text += presenter.folio_layout_section(vd)
         for i in sorted(want & set(sc)):
             s_ = sc[i]
             nxt = sc.get(i + 1)
@@ -966,6 +969,8 @@ def cmd_prompt(a) -> int:
             for x in ids:
                 p = asset_file(vd, f, byid[x])
                 text += f"- asset `{x}` ({asset_kind(f, byid[x])}): `{p.relative_to(REPO) if p.is_relative_to(REPO) else p}`\n"
+            if presenter.enabled(vd):
+                text += presenter.folio_scene_zone(vd, s_, FPS)
             if s_.get("enter") == "cut" and prv:
                 text += f"- continues scene {i - 1}: read `frames/scene_{i - 1:02d}.tsx` for carried-over elements.\n"
     if a.out:
@@ -1024,7 +1029,7 @@ def build_data(vd: Path, folio: dict, tl: dict) -> dict:
         scenes[str(s["index"])] = {"index": s["index"], "f0": s["f0"], "f1": s["f1"], "plate": s.get("plate", ""),
                                    "tone": s.get("tone", "paper"), "enter": s.get("enter", "dissolve")}
     ch = folio.get("chrome", {})
-    return {
+    data = {
         "chrome": {"running": ch.get("running", folio.get("title", "")), "subtitle": ch.get("subtitle", "")},
         "total": total,
         "words": [{"w": w["word"], "s": round(w["start"], 3), "e": round(w["end"], 3)} for w in words],
@@ -1032,6 +1037,10 @@ def build_data(vd: Path, folio: dict, tl: dict) -> dict:
         "assets": assets,
         "scenes": scenes,
     }
+    if presenter.enabled(vd):  # captions step aside from the presenter's zones
+        b0 = tl["narration_beats"][0]
+        data["presenter"] = {"hook_end": round(b0["t_end"], 3), "wipe": presenter.wipe_on(vd)}
+    return data
 
 
 ENTRY = """import React from 'react';
@@ -1257,12 +1266,16 @@ def cmd_still(a) -> int:
         for t in times:
             fr = max(0, min(nfr - 1, int(round(t * FPS))))
             png = outdir / f"scene_{i:02d}_t{t:05.1f}.png"
-            jobs.append((i, fr, png))
+            jobs.append((i, fr, png, s["f0"] / FPS + fr / FPS))
+
+    pres = presenter.enabled(vd)
 
     def one(j):
-        i, fr, png = j
+        i, fr, png, t_abs = j
         r = subprocess.run(["npx", "remotion", "still", str(b), f"S{i}", str(png), f"--frame={fr}", "--log", "error"],
                            cwd=REMOTION, capture_output=True, text=True)
+        if r.returncode == 0 and pres:  # outline the presenter's reserved zone at this moment
+            presenter.draw_zone(png, presenter.zone_at(vd, t_abs))
         return png, (None if r.returncode == 0 else (r.stderr + r.stdout)[-1500:])
 
     fails = 0
@@ -1286,6 +1299,8 @@ def render_key(vd, folio, s, data) -> str:
                  json.dumps(data["chrome"]), (REMOTION / "src" / "folio.tsx").read_text(encoding="utf-8"),
                  json.dumps(data["scenes"].get(str(s["index"] + 1)), sort_keys=True)):
         h.update(part.encode())
+    if data.get("presenter"):
+        h.update(json.dumps(data["presenter"], sort_keys=True).encode())
     for aid in sorted(used_assets(tsx, folio)):
         h.update(sha(vd / ASSET_DIR / Path(data["assets"].get(aid, "x")).name).encode())
     return h.hexdigest()
@@ -1348,6 +1363,13 @@ def decoded_duration(p: Path) -> float:
 def cmd_compile(a) -> int:
     vd = vdir(a.video)
     folio, tl = load_folio(vd), load_timeline(vd)
+    with_presenter = presenter.enabled(vd) and not a.no_presenter
+    if with_presenter:
+        probs = presenter.readiness(vd)
+        if probs:
+            print("  ERROR presenter not ready: " + "; ".join(probs)
+                  + f"\n  → python scripts/presenter.py generate {a.video}   (or compile --no-presenter)")
+            return 1
     scenes = sorted(folio["scenes"], key=lambda s: s["index"])
     clips = []
     for s in scenes:
@@ -1406,6 +1428,9 @@ def cmd_compile(a) -> int:
     elif marker.exists():
         marker.unlink()
     shutil.rmtree(seg, ignore_errors=True)
+    if with_presenter:
+        print("  overlaying the presenter (hook + wipe) ...", flush=True)
+        presenter.apply_to_final(vd, out)
     print(f"  ✓ {out.name} {decoded_duration(out):.1f}s ({out.stat().st_size // 2**20} MB)")
     return 0
 
@@ -1504,6 +1529,8 @@ def main() -> int:
     for name in ("place", "lint", "compile", "sheet", "status", "contact"):
         s = sub.add_parser(name)
         s.add_argument("video")
+        if name == "compile":
+            s.add_argument("--no-presenter", action="store_true", help="visuals only (a presenter lecture)")
     s = sub.add_parser("assets")
     s.add_argument("video")
     s.add_argument("--only")

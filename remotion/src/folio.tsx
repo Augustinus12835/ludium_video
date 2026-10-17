@@ -98,6 +98,8 @@ export type FolioData = {
   captions: CaptionGroup[];
   assets: Record<string, string>;
   scenes: Record<string, SceneSpan>;
+  /** Optional on-screen presenter (scripts/presenter.py): captions step aside from its zones. */
+  presenter?: {hook_end: number; wipe: boolean};
 };
 
 type Ctx = {data: FolioData; scene: SceneSpan; next?: SceneSpan; t0: number; dur: number; tokens: string[]};
@@ -280,7 +282,7 @@ const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: num
 const CAPTION_LEAD = 0.2; // show a caption slightly before its first word
 const CAPTION_HOLD = 1.4; // keep it after its last word unless the next arrives
 
-const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean}> = ({groups, T, night}) => {
+const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; presenter?: FolioData['presenter']}> = ({groups, T, night, presenter}) => {
   let gi = -1;
   for (let i = 0; i < groups.length; i++) {
     if (groups[i].t0 - CAPTION_LEAD <= T) gi = i; else break;
@@ -298,10 +300,12 @@ const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean}> = 
   const spoken = night ? PAL.cream : PAL.ink;
   const upcoming = night ? 'rgba(237,230,214,0.42)' : 'rgba(28,26,24,0.40)';
   const current = night ? '#C8373C' : PAL.crimson;
+  // presenter zones: the hook figure covers x ≥ 1180, the corner window x ≥ 1504 (bottom right)
+  const inset = !presenter ? 0 : T < presenter.hook_end ? 760 : presenter.wipe ? 430 : 0;
   return (
-    <div style={{position: 'absolute', left: 0, right: 0, bottom: 1080 - 1000, display: 'flex', justifyContent: 'center', opacity: op}}>
+    <div style={{position: 'absolute', left: 0, right: inset, bottom: 1080 - 1000, display: 'flex', justifyContent: 'center', opacity: op}}>
       <div style={{
-        maxWidth: 1460, padding: '12px 30px 14px', background: night ? 'rgba(22,21,25,0.84)' : 'rgba(242,237,227,0.9)',
+        maxWidth: Math.min(1460, 1920 - inset - 160), padding: '12px 30px 14px', background: night ? 'rgba(22,21,25,0.84)' : 'rgba(242,237,227,0.9)',
         fontFamily: FONT.text, fontSize: 33, lineHeight: 1.36, textAlign: 'center', letterSpacing: '-0.005em',
         boxShadow: night ? 'none' : '0 1px 0 rgba(60,52,44,0.08)',
       }}>
@@ -341,7 +345,7 @@ export const FolioStage: React.FC<{data: FolioData; scene: number; children: Rea
         <Img src={staticFile(night ? 'folio/paper_night.jpg' : 'folio/paper.jpg')} style={{position: 'absolute', width: W, height: H}} />
         <AbsoluteFill style={{opacity: fin * (1 - fout)}}>{children}</AbsoluteFill>
         <Chrome running={data.chrome.running} subtitle={data.chrome.subtitle} plate={sc.plate} T={T} night={night} />
-        <Captions groups={data.captions} T={T} night={night} />
+        <Captions groups={data.captions} T={T} night={night} presenter={data.presenter} />
       </AbsoluteFill>
     </FolioCtx.Provider>
   );

@@ -122,6 +122,42 @@ with *Speech to Text* enabled for ElevenLabs Scribe (about US$0.22 an hour of au
 pay as you go — whichever TTS provider you chose). Without it, local files fall
 back to local Whisper (`pip install openai-whisper`).
 
+## On-screen presenter (optional)
+
+Any video, in any mode, can have a **lip-synced presenter made from one photo** of you, a
+colleague who has agreed, or a drawn character. The presenter speaks the narration large beside
+the visuals in the opening hook, then from a small window in the bottom-right corner, and is
+*directed*: a subagent gives chosen sentences a gesture or an expression with a teaching job
+(raise a finger at the key result, point at the screen, wonder aloud at a question). Frames are
+authored around the presenter. Manim and Remotion visuals keep the hook's right side and the
+window's corner clear, and folio captions step aside.
+
+**Example:** [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=URoGEXfxkCs)
+from the [Ludium・ルーディウム](https://www.youtube.com/@LudiumAI) Japanese channel, presented by
+the anime tutor ルミ.
+
+It runs [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)
+(MIT) on [Modal](https://modal.com), the same account Drama 3 uses. It's **off unless you ask for it**
+(`/run-pipeline … --presenter`). Setup, once:
+
+1. `pip install modal 'rembg[cpu]' && modal setup`; then
+   `python scripts/longcat_avatar_modal.py download` copies the weights (~57 GB) to a Modal Volume.
+2. `python scripts/presenter.py setup my_photo.jpg` cuts the person out and writes
+   `inputs/presenter/default/` (`hook.png`, full figure; `wipe.png`, upper body; both on chroma
+   green). Use a sharp, well-lit photo, facing the camera, hands visible, ideally waist up or
+   more. Write a one-sentence description of the person in `presenter.json` → `"look"`.
+
+| Cost on Modal (Oct 2026) | |
+|---|---|
+| Hook (720p, H200) | ~US$0.075 per second, ~US$2.40 for a 30-second hook |
+| Corner window (480p, H100, one clip per frame) | ~US$0.02 per second + ~2 min of model load per clip |
+| **A 10-minute video, hook + window** | **~US$16** |
+| A 10-minute video, hook only (`--presenter-hook-only`) | ~US$2.40 |
+
+So the presenter costs far more than the narration: Modal's US$30 monthly credit covers about two
+fully presented 10-minute videos. Clips regenerate only when their narration or direction changes.
+Use only photos of people who have agreed to be presented this way.
+
 ## Humanities (folio) setup
 
 Folio also generates images, so it needs two more keys in `.env`:

@@ -225,6 +225,14 @@ it starts voicing, it opens its own Modal container (~3-4 min, ~US$0.27) — fin
 If the pre-TTS narration gate halts it, triage per references/recovery.md ("narration
 check"); `SKIP_NARRATION_CHECK=1` only for a confirmed false positive.
 
+### 3b. presenter (only when `pipeline/<L>/presenter.json` exists)
+
+Right after TTS: direct the presenter and start its clips, which then generate on Modal while you
+author frames (references/presenter.md "Per video"). The codegen prompt for each frame then
+carries a **Presenter layout** section: the first frame keeps every object at x < 1.4, the later
+frames keep x > 4.0 ∧ y < −0.9 clear. `audit_frames.py` outlines that zone in red on its stills,
+so nothing may sit inside the box.
+
 ### 4. animate — frame authoring
 
 List the frames: `render_step_prompt.py manim --video-dir <dir> --pretty`.
@@ -309,7 +317,8 @@ plan is often right when a frame sets its own local sign semantics.
 venv/bin/python scripts/pipeline.py video <L>/Video-N --from animate --no-review --<mode>
 ```
 
-(reuses the authored frames → compile → subtitle), then the frame audit: `audit_frames.py`
+(reuses the authored frames → compile → subtitle; with a presenter, compile refuses until its
+clips are current and then keys the presenter over the cut, keeping `final_video_board.mp4`), then the frame audit: `audit_frames.py`
 contact sheets + full-res stills, fix clear defects, re-render, recompile.
 
 Audit notes: the "static ≥ 6 s" flag is nearly always a false positive on Manim frames (thin

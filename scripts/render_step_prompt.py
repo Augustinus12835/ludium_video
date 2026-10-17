@@ -1192,6 +1192,9 @@ def step_manim(args: argparse.Namespace) -> None:
         color_plan=mv.get("color_plan"),
         color_accents=_codegen_accents(video_dir),
     )
+    from scripts.presenter import enabled as presenter_enabled, manim_layout_section
+    if presenter_enabled(video_dir):  # opt-in on-screen presenter: reserve its zone in this frame
+        user += manim_layout_section(video_dir, frame_num)
     if frame_type == "code":
         prompt_mode = "technical"  # only technical-mode frames carry code_steps
     else:

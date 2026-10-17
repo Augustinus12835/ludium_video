@@ -23,6 +23,7 @@ import json
 import math
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -165,9 +166,17 @@ def main():
 
     out_dir = vd / "audit"
     results = []
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.presenter import enabled as presenter_enabled, draw_zone, frame_numbers, wipe_on
+    pres = presenter_enabled(vd)
+    first = frame_numbers(vd)[0] if pres else None
     for mp4 in mp4s:
         fn = int(mp4.stem.split("_")[1])
         r = build_sheet(mp4, fn, label, out_dir, cols=args.cols)
+        if pres:  # opt-in presenter: outline its reserved zone on every full-res still
+            zone = "hook" if fn == first else ("wipe" if wipe_on(vd) else None)
+            for still in (out_dir / "full").glob(f"frame_{fn}_t*.png"):
+                draw_zone(still, zone)
         results.append(r)
         flag = ("  ⚠ static " + ", ".join(r["static_flags"])) if r["static_flags"] else ""
         print(f"frame {fn}: {r['duration']}s, {len(r['samples'])} samples -> {r['sheet']}{flag}")
