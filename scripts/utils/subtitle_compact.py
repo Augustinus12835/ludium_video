@@ -492,6 +492,47 @@ def _proper_number_word(toks: List[_Tok], i: int) -> bool:
             or _parse_ordinal(toks, i) is not None)
 
 
+# "the year two thousand", "the beginning of two thousand": 2000 is a year here, not a
+# quantity (PC1_U01 V1 would have captioned the dot-com peak "by 2,000"). A bare "of two
+# thousand" stays a count ("a population of two thousand") unless a time word precedes it.
+_YEAR_2000_PREV = {'year', 'in', 'since', 'until', 'till', 'by'}
+_YEAR_2000_TIME = {'beginning', 'start', 'end', 'middle', 'spring', 'summer', 'fall', 'autumn',
+                   'winter', 'january', 'february', 'march', 'april', 'may', 'june', 'july',
+                   'august', 'september', 'october', 'november', 'december'}
+
+
+def _year_2000_context(toks: List[_Tok], i: int) -> bool:
+    prev = toks[i - 1].core.lower() if i else ''
+    if prev in _YEAR_2000_PREV:
+        return True
+    return prev == 'of' and i >= 2 and toks[i - 2].core.lower() in _YEAR_2000_TIME
+
+
+def _pass_money(toks: List[_Tok]) -> None:
+    """'one dollar forty-nine' -> $1.49, 'eleven hundred dollars' -> $1,100,
+    'two dollars and fifty cents' -> $2.50 (PC1_U01 V1's menu prices)."""
+    i = 0
+    while i < len(toks):
+        np = None if toks[i].mathy else _parse_cardinal(toks, i)
+        if not np or np.decimal is not None or np.value is None or np.end >= len(toks) \
+                or toks[np.end].core.lower() not in ('dollar', 'dollars') \
+                or not _clean_between(toks, i, np.end + 1) or _listing_context(toks, i):
+            i += 1
+            continue
+        end, text = np.end + 1, f'${np.value:,}'
+        k = end + (1 if end < len(toks) and toks[end].core.lower() == 'and'
+                   and not toks[end - 1].trail else 0)
+        cents = _parse_cardinal(toks, k) if k < len(toks) and not toks[end - 1].trail else None
+        if cents and cents.decimal is None and cents.value is not None \
+                and 1 <= cents.value <= 99 and _clean_between(toks, end - 1, cents.end):
+            end, text = cents.end, f'{text}.{cents.value:02d}'
+            if end < len(toks) and toks[end].core.lower() in ('cent', 'cents') \
+                    and not toks[end - 1].trail:
+                end += 1
+        _merge(toks, i, end, text)
+        i += 1
+
+
 def _pass_numbers(toks: List[_Tok]) -> None:
     i = 0
     while i < len(toks):
@@ -520,7 +561,9 @@ def _pass_numbers(toks: List[_Tok]) -> None:
             nxt = toks[np.end].core.lower() if np.end < len(toks) else ''
             attach = nxt in ('percent', 'degrees')
             if np.strong or attach:
-                t = _merge(toks, i, np.end, np.text)
+                text = '2000' if np.value == 2000 and np.decimal is None \
+                    and _year_2000_context(toks, i) else np.text
+                t = _merge(toks, i, np.end, text)
                 if attach:
                     _attach_unit(toks, toks.index(t))
                 i += 1
@@ -1035,6 +1078,7 @@ def compact_words(words: List[Dict], math_mode: bool = False,
     toks = _make_toks(words)
     _pass_aliases(toks, math_mode)
     _pass_pow10(toks)
+    _pass_money(toks)
     _pass_numbers(toks)
     _pass_decades(toks)
     if math_mode:

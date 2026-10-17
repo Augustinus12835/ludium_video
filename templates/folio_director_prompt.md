@@ -143,6 +143,10 @@ Prompt rules (the model sees the house style clause + `world` + cast looks + you
   A then-state prompt describes only the change and may be 10–30 words.
 - **Positive wording only.** A negative ("no helmets") paints its token; describe what IS
   there instead. Sentence case (ALL-CAPS text gets lettered onto the picture).
+- **Stage the people.** For every cast member in a plate say where they look (at whom or
+  what), and what each hand is doing when hands matter (gives, takes, holds a cup, grips a
+  spear). A figure left unstaged falls back on the portrait's pose: two brothers at a banquet
+  came out in their portrait stares, facing away from each other.
 - **No lettering in pictures** except map `places`. Writing surfaces show "faint illegible"
   script. All words on screen are overlays.
 - Compose for overlays: a plate that will carry cards or type needs a quiet area (sky, floor,
@@ -158,6 +162,7 @@ Prompt rules (the model sees the house style clause + `world` + cast looks + you
   "chrome": {"running": "<series name, e.g. Greek Tragedy>", "subtitle": "<short episode title>"},
   "tail": 2.5,   // silent hold (s) after the last word: the final scene is extended so the ending breathes
   "canvas": "4k", // ALWAYS: every plate and map at 3840×2160 for the camera
+  "likeness": "sheet", // ALWAYS: plates get a head-only likeness sheet of each cast portrait, not the bust (its pose got copied)
   "off_screen": [{"what": "the capture on Sphacteria", "why": "a later episode tells it; the narration only points to Pylos", "terms": ["Sphacteria", "292"]}],
   "world": "<period anchor, positive, ≤120 words>",
   "cast": [{"id": "aeschylus", "name": "Aeschylus", "look": "<face, hair, beard, dress; likeness anchor>", "portrait": "aeschylus"}],

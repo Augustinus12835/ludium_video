@@ -144,11 +144,20 @@ automatically) — lower `--jobs` on a lower tier. Maps stay on grounded Gemini 
 a full regeneration, generate in dependency order: portraits, then bases, then then-states
 (`--only` lists).
 
+**Likeness sheets.** `folio.json` carries `"likeness": "sheet"` (the director writes it; `audit` warns
+when it is missing): a plate's cast reference is a head-only crop of the portrait beside its mirror
+image (`raw/<id>.likeness.png`), not the whole bust, because whole busts got copied pose-for-pose. A
+one-sided mark (a scar, a lost eye — in the `look`, or `"asymmetric": true` on the cast member) keeps a
+single unmirrored head. Episodes made before it keep the bust (cache keys unchanged); set
+`"likeness": "sheet"` on one asset when rerolling it for a copied pose, and stage the gaze and hands
+in its prompt.
+
 **Asset QA (clean-context vision subagent, ~60 assets each):** `folio.py contact` tiles the
 assets; check lettering in pictures (only map `places` may be lettered), anachronism against
 `world` (tolerate MINOR background anachronism unless it is wholly out of period or ruins the
 scene; foreground subjects must be right), wrong likeness (a cast portrait must match its
-`look`), anatomy, a then-state that changed its framing, a map with wrong geography. Fix by
+`look`), **a pose copied from the portrait** (a figure keeping its bust's head turn and stare
+instead of looking at whom the scene says), anatomy (arms and wrists that bend the wrong way), a then-state that changed its framing, a map with wrong geography. Fix by
 editing the asset's `prompt` (positive wording — a negative paints its token) and
 `folio.py assets … --only <id> --force`. Two rounds max.
 

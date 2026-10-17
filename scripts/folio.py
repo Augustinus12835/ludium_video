@@ -131,6 +131,39 @@ MAP_PREAMBLE = (
     "straits. Then draw the map so the geography is factually correct.\n\n")
 
 
+def likeness_mode(folio: dict, asset: dict) -> str:
+    """How a cast portrait is passed to a plate: "sheet" (head-only mirror-pair likeness
+    sheet, 2026-10-17 — new episodes) or "portrait" (the whole bust; older episodes keep it
+    so their cache keys stay valid). folio.json `"likeness"`, overridable per asset."""
+    return asset.get("likeness") or folio.get("likeness") or "portrait"
+
+
+# A one-sided mark must not be mirrored: Philip II lost his RIGHT eye (Methone, 354 BC), and a
+# mirror pair would show the scar on both sides and let the model pick either.
+ASYMMETRIC_RE = re.compile(r"\b(scar|scarred|patch|one[- ]eyed|blind|missing|lost (his|her) (left|right))", re.I)
+
+
+def likeness_sheet(portrait_raw: Path, mirror: bool = True) -> Path:
+    """Head crop of a cast portrait beside its mirror image: the plate model gets the face
+    without the bust's shoulders, arm and drapery, and with no single head direction to
+    copy. mirror=False (a one-sided mark — a scar, a lost eye) keeps the single true head.
+    Written next to the raw portrait; rebuilt when the portrait changes."""
+    out = portrait_raw.with_name(portrait_raw.stem + (".likeness.png" if mirror else ".likeness1.png"))
+    if out.exists() and out.stat().st_mtime >= portrait_raw.stat().st_mtime:
+        return out
+    im = Image.open(portrait_raw).convert("RGB")
+    w, h = im.size   # portrait = head in the upper half of a 3:4 sheet (KIND_CLAUSE)
+    head = im.crop((int(w * 0.14), int(h * 0.02), int(w * 0.86), int(h * 0.54)))
+    if not mirror:
+        head.save(out)
+        return out
+    sheet = Image.new("RGB", (head.width * 2 + 24, head.height), tuple(int(v) for v in PAPER_RGB))
+    sheet.paste(head, (0, 0))
+    sheet.paste(head.transpose(Image.FLIP_LEFT_RIGHT), (head.width + 24, 0))
+    sheet.save(out)
+    return out
+
+
 def build_prompt(asset: dict, folio: dict, kind: str) -> str:
     parts = [HOUSE_STYLE, KIND_CLAUSE[kind]]
     world = (folio.get("world") or "").strip()
@@ -138,7 +171,22 @@ def build_prompt(asset: dict, folio: dict, kind: str) -> str:
         parts.append(f"Period and material culture: {world}")
     cast = {c["id"]: c for c in folio.get("cast", []) if isinstance(c, dict) and c.get("id")}
     looks = [f"{cast[c]['name']}: {cast[c].get('look', '')}" for c in asset.get("cast", []) if c in cast]
-    if looks:
+    if looks and likeness_mode(folio, asset) == "sheet":
+        # A whole bust reference still got copied pose-for-pose (a banquet plate: Atreus and Thyestes
+        # at the banquet each kept his portrait's stare and turn, Aerope's arm twisted to match
+        # her bust), so the reference is now a head-only likeness sheet — see likeness_sheet().
+        parts.append("People in this picture, with the face, hair and build described here: "
+                     + " ".join(looks) + ". Each reference image is a likeness sheet of one "
+                     "person's head, drawn twice as mirror images, given only so the face and hair "
+                     "are recognisable. Draw every person's whole figure anew as an actor in this "
+                     "scene: head turn, gaze, arms and hands all follow the subject described "
+                     "below, people look at whom the subject says they look at, and every arm, "
+                     "wrist and hand bends the natural way a real body bends.")
+        if any(cast[c].get("asymmetric") or ASYMMETRIC_RE.search(cast[c].get("look", ""))
+               for c in asset.get("cast", []) if c in cast):
+            parts[-1] += (" A person with a one-sided mark has a single unmirrored head on the sheet; "
+                          "keep the mark on the side the description names, on the person's own left or right.")
+    elif looks:
         # A reference portrait is a likeness, not a pose: copying its head angle and gaze
         # gave Alexander the Azara herm's upturned stare in every plate (ALX_E04).
         parts.append("People in this picture, with the face, hair and build described here and "
@@ -660,6 +708,14 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     for r in refs:
         if not r.exists():
             return a["id"], f"WAIT (reference {r.name} not generated yet)"
+    key_refs = list(refs)
+    if likeness_mode(folio, a) == "sheet":
+        n_of = 1 if a.get("of") else 0
+        sided = [cid for cid in a.get("cast", []) if cast.get(cid, {}).get("portrait")
+                 and cast[cid]["portrait"] != a["id"]]
+        refs = refs[:n_of] + [likeness_sheet(r, mirror=not (cast[cid].get("asymmetric")
+                                                            or ASYMMETRIC_RE.search(cast[cid].get("look", ""))))
+                              for r, cid in zip(refs[n_of:], sided)]
     if a.get("from"):
         return import_one(vd, folio, a, force)
     prompt = build_prompt(a, folio, kind)
@@ -667,7 +723,7 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     model = TIERS[tier]
     grounding = kind == "map"
     canvas = asset_canvas(folio, a)
-    kd = {"p": prompt, "m": model, "k": kind, "refs": [sha(r) for r in refs], "seed": a.get("seed", 0)}
+    kd = {"p": prompt, "m": model, "k": kind, "refs": [sha(r) for r in key_refs], "seed": a.get("seed", 0)}
     if canvas:
         kd["canvas"] = canvas   # only when set, so existing keys stay valid
     key = json.dumps(kd, sort_keys=True)
@@ -839,6 +895,9 @@ def cmd_audit(a) -> int:
     if f.get("canvas") not in CANVAS and not any(x.get("canvas") in CANVAS for x in assets):
         warns.append('no "canvas": "4k" in folio.json — plates will be 1920×1080 and the <Plate camera> '
                      'cannot move in close (new episodes: add it before `assets`)')
+    if f.get("cast") and f.get("likeness") != "sheet" and not any(x.get("likeness") for x in assets):
+        warns.append('no "likeness": "sheet" in folio.json — plates get the whole cast bust as reference '
+                     'and copy its pose and gaze (new episodes: add it before `assets`)')
     cast_ids = {c.get("id") for c in f.get("cast", [])}
     for c in f.get("cast", []):
         if c.get("portrait") and c["portrait"] not in idset:
