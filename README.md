@@ -97,17 +97,19 @@ voices you have consent to use. Check current prices at [modal.com/pricing](http
 
 A **lip-synced presenter from one photo** (you, a consenting colleague, or a drawn character):
 large beside the visuals in the opening hook, then in a bottom-right window. A subagent *directs*
-it, giving sentences a gesture or expression with a teaching job, and frames keep its zones clear.
+it, giving sentences an expression with a teaching job, and frames keep its zones clear.
 Example: [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=UWV9QqnKZC8),
 presented by the anime tutor ルミ.
 
-Runs [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)
-(MIT) on Modal. Off unless you pass `--presenter`.
+Runs on Modal: the hook on [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)
+(MIT), the corner window on [SoulX-FlashTalk-14B](https://huggingface.co/Soul-AILab/SoulX-FlashTalk-14B)
+(Apache-2.0) — about US$5 per 10-minute video. Off unless you pass `--presenter`.
 
 1. `pip install modal 'rembg[cpu]' && modal setup`, then
-   `python scripts/longcat_avatar_modal.py download` (~57 GB).
+   `python scripts/longcat_avatar_modal.py download` (~57 GB) and
+   `python scripts/flashtalk_modal.py download` (~54 GB).
 2. `python scripts/presenter.py setup my_photo.jpg` writes `inputs/presenter/default/`. Use a sharp,
-   well-lit, front-facing photo, waist up with hands visible. Describe the person in one sentence
+   well-lit, front-facing photo, waist up. Describe the person in one sentence
    in `presenter.json` → `"look"`.
 
 | Cost per 10-min video (Oct 2026) | |

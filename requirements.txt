@@ -30,7 +30,7 @@ pymupdf>=1.24.0           # obp_pdf_to_markdown.py: open-textbook PDFs with a te
 # Gemini images (grounded maps) are plain REST calls through `requests` (GOOGLE_CLOUD_API_KEY)
 
 # Optional: the on-screen presenter (scripts/presenter.py) cuts the person out of your photo
-# rembg[cpu]>=2.0.0       # (LongCat itself runs on Modal — `modal` above)
+# rembg[cpu]>=2.0.0       # (LongCat and FlashTalk themselves run on Modal — `modal` above)
 
 # Optional: local Whisper transcription for short local videos
 # (ElevenLabs Scribe is the default engine; install only if you want --whisper)

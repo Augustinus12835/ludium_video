@@ -1,35 +1,42 @@
 #!/usr/bin/env python3
 """On-screen presenter (OPTIONAL, opt-in per lecture): a lip-synced presenter made from ONE photo.
 
-A photo of a person (or a drawn character) becomes a presenter who speaks the narration, generated
-by LongCat-Video-Avatar 1.5 on a Modal GPU (scripts/longcat_avatar_modal.py) and keyed over the
-finished video in any mode — Manim (math/technical) or Remotion (folio):
+A photo of a person (or a drawn character) becomes a presenter who speaks the narration, lip-synced
+on Modal GPUs and keyed over the finished video in any mode — Manim (math/technical) or Remotion (folio):
 
-- **Hook** (the first frame): the presenter large on the RIGHT of the picture (720p, H200). The
-  frame's visuals keep the left ~60 % of the screen; the right side is reserved.
-- **Wipe** (every later frame): the presenter in a small rounded window in the bottom-right corner
-  (480p, H100) — ONE clip per frame, so the presenter returns to rest where the frame changes.
-  Every frame keeps that corner clear. `enable --no-wipe` = hook only (≈ 1/6 of the cost).
+- **Hook** (the first frame): the presenter large on the RIGHT of the picture — LongCat-Video-Avatar
+  1.5 at 720p on an H200 (scripts/longcat_avatar_modal.py). The frame's visuals keep the left ~60 %
+  of the screen; the right side is reserved. FACE-ONLY: a full-figure gesture tends to leave a
+  translucent ghost of the resting hand.
+- **Wipe** (every later frame): the presenter, head and shoulders, in a small rounded window in the
+  bottom-right corner — SoulX-FlashTalk-14B at 480x480 on an H100 (scripts/flashtalk_modal.py), ONE
+  clip per frame (the presenter resets where the frame changes), all of a video's clips in ONE
+  container. Lip-sync, expressions and nods; no hands. Every frame keeps that corner clear.
+  `enable --no-wipe` = hook only.
 
-The presenter is DIRECTED, not decorative: a subagent gives chosen sentences a gesture and/or a
-facial expression whose teaching job is spelled out in GESTURES / FACES below (mark the key point,
-pose a question, direct the eye, warn, react). Directions sit on verbatim anchor phrases, like folio
-cues. LongCat holds a pose once taken (each 3.2 s segment continues the last), so the FIRST gesture
-in a clip lands reliably and later ones are best-effort — hence one clip per frame, ONE gesture per
-frame, and a frame split just before its gesture (`_pieces`). The hook is face-only: a full-figure
-gesture tends to leave a translucent ghost of the resting hand.
+The presenter is DIRECTED, not decorative: a subagent gives chosen sentences a facial expression (or a
+`nod`) whose teaching job is spelled out in FACES below (mark the key point, pose a question, warn,
+react). Directions sit on verbatim anchor phrases, like folio cues; FlashTalk switches its text prompt
+on those sentences per 1.12 s chunk.
 
-Cost (Modal, Oct 2026): hook ≈ US$0.075 per second (≈ US$2.40 for a 30 s hook); wipe ≈ US$0.02 per
-second + ~2 min of model load per frame clip (≈ US$14 per 10 minutes). A 10-minute video with both
-≈ US$16; hook only ≈ US$2.40.
+**LongCat wipe (opt-in, `enable --longcat-wipe`):** waist up, with hand GESTURES (point, count, think…).
+It is ~6x the cost and the gestures proved unreliable: LongCat holds a pose once taken (each 3.2 s
+segment continues the last), so only the first gesture in a clip lands — hence one gesture per frame
+and a split just before it (`_pieces`) — a raised hand can float to the end of the clip (`hands` +
+`reset`), a ghost copy of the resting hands can appear, and long clips can grow drawn-in captions.
 
-    python scripts/longcat_avatar_modal.py download        # once: weights (~57 GB) -> a Modal Volume
+Cost (Modal, Oct 2026): hook ≈ US$0.075 per second (≈ US$2.40 for a 30 s hook); FlashTalk wipe ≈
+US$0.003 per second + ~3 min of start-up per video (≈ US$2.50 per 10 minutes). A 10-minute video ≈
+US$5; hook only ≈ US$2.40; with a LongCat wipe ≈ US$16.
+
+    python scripts/longcat_avatar_modal.py download        # once: hook weights (~57 GB) -> a Modal Volume
+    python scripts/flashtalk_modal.py download             # once: wipe weights (~54 GB) -> a Modal Volume
     python scripts/presenter.py setup PHOTO [--name NAME]  # once per presenter -> inputs/presenter/NAME/
-    python scripts/presenter.py enable pipeline/<L> [--name NAME] [--no-wipe]   # BEFORE frames are authored
+    python scripts/presenter.py enable pipeline/<L> [--name NAME] [--no-wipe | --longcat-wipe]   # BEFORE frames are authored
     python scripts/presenter.py prompt pipeline/<L>/Video-N  # directions prompt -> subagent -> presenter/directions.json
     python scripts/presenter.py plan VIDEO [...]          # validate the directions, write presenter/plan.json
-    python scripts/presenter.py generate VIDEO [...]      # LongCat clips (missing/stale only), all in parallel
-    python scripts/presenter.py hands VIDEO [...]         # floating-hand check + review sheets
+    python scripts/presenter.py generate VIDEO [...]      # clips (missing/stale only): hooks, then wipes
+    python scripts/presenter.py hands VIDEO [...]         # LongCat gestures only: floating-hand check
     python scripts/presenter.py reset VIDEO N [...]       # reset frame N after its gesture (then generate)
     python scripts/presenter.py zones STILL --hook|--wipe # outline the reserved zone on a 1920-wide still
     (compile_video.py / folio.py compile overlay the presenter automatically once its clips exist)
@@ -54,6 +61,10 @@ WIPE_PX, WIPE_MARGIN = 380, 36
 FADE = 0.5
 CUE_LEAD = 0.5            # a direction starts this long before its sentence (the motion needs to build)
 LONGCAT_REV = 'ref30-mask5-release-perframe-split'   # model settings; part of the clip digest
+WIPE_MODELS = ('flashtalk', 'longcat')
+FLASHTALK_REV = 'ft-480sq-4step-face'       # FlashTalk settings; part of the clip digest
+FT_SIZE = (480, 480)                        # one size per container (FlashTalk recompiles per size)
+FT_GESTURES = ('nod',)                      # the one gesture a head-and-shoulders wipe can show
 
 DEFAULT_CONFIG = {
     'look': '',
@@ -139,11 +150,21 @@ def config(video: Path) -> dict:
     cfg = {**DEFAULT_CONFIG, **(json.loads(own.read_text(encoding='utf-8')) if own.exists() else {}), **lec}
     cfg['dir'] = d
     cfg.setdefault('wipe', True)
+    cfg.setdefault('wipe_model', 'flashtalk')
     return cfg
 
 
 def wipe_on(video: Path) -> bool:
     return enabled(video) and bool(config(video).get('wipe', True))
+
+
+def wipe_model(video: Path) -> str:
+    """'flashtalk' (default: head and shoulders, expressions + nods) or 'longcat' (waist up, gestures)."""
+    return config(video).get('wipe_model', 'flashtalk')
+
+
+def gestures_in_wipe(video: Path) -> bool:
+    return wipe_on(video) and wipe_model(video) == 'longcat'
 
 
 def is_folio(video: Path) -> bool:
@@ -182,9 +203,10 @@ def _cutout(rgb, green: bool):
 
 
 def _framings(cut):
-    """RGBA cutout -> (hook 1024x1536 on green, wipe 1024x1024 on green).
-    Hook: the whole figure, bottom-aligned (flush when the photo crops the body). Wipe: a square of
-    the upper body with headroom, centred on the head."""
+    """RGBA cutout -> (hook 1024x1536, wipe 1024x1024, wipe_head 1024x1024), all on green.
+    Hook: the whole figure, bottom-aligned (flush when the photo crops the body). Wipe (LongCat): a
+    square of the upper body with headroom, centred on the head. Wipe head (FlashTalk): a tighter
+    head-and-shoulders square — the hands out of shot."""
     import numpy as np
     from PIL import Image
     al = np.asarray(cut)[..., 3] > 128
@@ -217,7 +239,13 @@ def _framings(cut):
     if flush:
         top = min(top, y1 - s)
     wipe = place(s, s, hx - s / 2, top, (1024, 1024))
-    return hook, wipe
+
+    hs = min(max(w * 0.95, h * 0.36), h * 0.6)       # head and shoulders: a third of a full figure
+    if flush:
+        hs = min(hs, h / 0.93)
+    htop = y0 - 0.08 * hs
+    head_sq = place(hs, hs, hx - hs / 2, htop, (1024, 1024))
+    return hook, wipe, head_sq
 
 
 def cmd_setup(a):
@@ -226,29 +254,34 @@ def cmd_setup(a):
     d.mkdir(parents=True, exist_ok=True)
     rgb = ImageOps.exif_transpose(Image.open(a.photo)).convert('RGB')
     rgb.save(d / 'source.png')
-    hook, wipe = _framings(_cutout(rgb, a.green))
+    hook, wipe, head_sq = _framings(_cutout(rgb, a.green))
     hook.save(d / 'hook.png')
     wipe.save(d / 'wipe.png')
+    head_sq.save(d / 'wipe_head.png')
     cfg = d / 'presenter.json'
     if not cfg.exists():
         cfg.write_text(json.dumps({k: v for k, v in DEFAULT_CONFIG.items()}, indent=2) + '\n', encoding='utf-8')
-    print(f'✓ {d / "hook.png"} (hook, full figure)\n✓ {d / "wipe.png"} (corner window, upper body)')
+    print(f'✓ {d / "hook.png"} (hook, full figure)\n✓ {d / "wipe_head.png"} (corner window, head and shoulders)'
+          f'\n✓ {d / "wipe.png"} (corner window, upper body — only for --longcat-wipe)')
     if not json.loads(cfg.read_text(encoding='utf-8')).get('look'):
         print(f'→ LOOK at hook.png and write "look" in {cfg}: one sentence describing the presenter as\n'
               '  pictured (age, hair, glasses, clothing), e.g. "A man in his forties with short grey hair, rimless\n'
-              '  glasses and a dark blue sweater." LongCat\'s prompt opens with it.')
-    print('  Replace hook.png / wipe.png with your own framings if you like (keep the flat green backdrop).')
+              '  glasses and a dark blue sweater." Every presenter prompt opens with it.')
+    print('  Replace hook.png / wipe_head.png / wipe.png with your own framings if you like (keep the flat\n'
+          '  green backdrop; wipe_head.png = head and shoulders, hands out of shot).')
 
 
 def cmd_enable(a):
     lec = _lecture_dir(Path(a.lecture))
     d = PRESENTERS / a.name
-    for f in ('hook.png', 'wipe.png', 'presenter.json'):
+    model = 'longcat' if a.longcat_wipe else 'flashtalk'
+    for f in ('hook.png', 'wipe.png' if model == 'longcat' else 'wipe_head.png', 'presenter.json'):
         if not (d / f).exists():
             sys.exit(f'✗ {d / f} missing — run presenter.py setup PHOTO --name {a.name} first')
-    (lec / 'presenter.json').write_text(json.dumps({'name': a.name, 'wipe': not a.no_wipe}, indent=2) + '\n',
-                                        encoding='utf-8')
-    print(f'✓ presenter "{a.name}" enabled for {lec.name} ({"hook + wipe" if not a.no_wipe else "hook only"}).'
+    (lec / 'presenter.json').write_text(json.dumps({'name': a.name, 'wipe': not a.no_wipe, 'wipe_model': model},
+                                                   indent=2) + '\n', encoding='utf-8')
+    what = 'hook only' if a.no_wipe else f'hook + {model} wipe'
+    print(f'✓ presenter "{a.name}" enabled for {lec.name} ({what}).'
           '\n  Frames authored from now on keep the presenter zones clear.')
 
 
@@ -434,6 +467,9 @@ def resolve_directions(video: Path):
             probs.append(f'{where}: empty direction')
         if g and n == first:
             probs.append(f'{where}: the hook is FACE-ONLY — no gesture (a full-figure gesture ghosts the resting hand)')
+        elif g and g in GESTURES and g not in FT_GESTURES and not gestures_in_wipe(video):
+            probs.append(f'{where}: gesture {g!r} — the wipe is head and shoulders (FlashTalk): give a `face`, '
+                         f'or `nod` at most')
         span, hits = anchor_span(load_words(video, n), d.get('anchor', ''))
         if span is None:
             probs.append(f'{where}: anchor found {hits}× in the frame — must be verbatim and occur exactly once')
@@ -441,18 +477,72 @@ def resolve_directions(video: Path):
         out.setdefault(n, []).append((span[0], span[1], {x: d[x] for x in ('gesture', 'face', 'reset') if d.get(x)}))
     for n, ds in out.items():
         ds.sort(key=lambda x: x[0])
-        if sum(1 for _, _, x in ds if x.get('gesture')) > 1:
+        if gestures_in_wipe(video) and sum(1 for _, _, x in ds if x.get('gesture')) > 1:
             probs.append(f'frame {n}: more than one gesture — ONE gesture per frame (later ones rarely happen)')
     return out, probs
 
 
-def direction_menu() -> str:
-    g = '\n'.join(f'- `{k}` — {job}' for k, (job, _, _) in GESTURES.items())
+def direction_menu(gestures: bool = True) -> str:
+    g = '\n'.join(f'- `{k}` — {job}' for k, (job, _, _) in GESTURES.items() if gestures or k in FT_GESTURES)
     f = '\n'.join(f'- `{k}` — {job}' for k, (job, _) in FACES.items())
     return f'Gestures:\n{g}\n\nFaces:\n{f}'
 
 
 def directions_prompt(video: Path) -> str:
+    if gestures_in_wipe(video):
+        return _directions_prompt_gestures(video)
+    from scripts.utils.script_parser import load_script
+    video = Path(video).resolve()
+    sd = load_script(video)
+    rel = video.relative_to(REPO) if video.is_relative_to(REPO) else video
+    wipe = wipe_on(video)
+    frames = '\n\n'.join(f'### Frame {f.number}' + (' — THE HOOK' if i == 0 else '')
+                         + f'\n\n{f.narration}' for i, f in enumerate(sd.frames)
+                         if i == 0 or wipe)
+    return f"""# Direct the on-screen presenter
+
+This video has an on-screen presenter who speaks the narration below, lip-synced: large beside the
+visuals in the first frame (the hook){', then head and shoulders from a small window in the bottom-right corner for every later frame' if wipe else ''}.
+**You direct the presenter's EXPRESSION**: pick the sentences where a reaction helps the viewer LEARN at
+that moment. The presenter is a teacher, not decoration — every direction does one of these jobs:
+
+- **mark what to remember** — the definition, theorem, result or thesis sentence: `confident` / `serious`
+- **pose a question** — the sentence that asks it: `curious` (the answer gets its own reaction)
+- **warn** — a common mistake or a forgotten condition: `serious`
+- **react** — a counter-intuitive fact: `surprised`; an elegant result or a finished proof: `delighted`;
+  reflecting on what was just shown: `thoughtful`; confirming ("yes, that's right"): `"gesture": "nod"`
+
+{direction_menu(gestures=False)}
+
+Rules:
+- **No hand gestures.** The hands are out of shot in the corner window and the hook is face-only;
+  `nod` (a head movement) is the only gesture, and never in the hook. The gate rejects any other.
+- **Faces work anywhere** and change freely: a direction on most sentences that carry a point is normal.
+  Expressions read subtly (a warm talker, not an actor), so pick the clearest one. Nothing on filler.
+- A direction lasts for its sentence (it starts just before it).
+- `anchor` = a few words copied VERBATIM from the frame's narration that occur exactly once in that
+  frame; the direction applies to the sentence containing them.
+
+Write `{rel}/presenter/directions.json`:
+
+```json
+{{"directions": [
+  {{"frame": {sd.frames[0].number}, "anchor": "verbatim words from the hook", "face": "curious"}},
+  {{"frame": {sd.frames[min(1, len(sd.frames) - 1)].number}, "anchor": "verbatim words", "face": "confident"}}
+]}}
+```
+
+Then run `python scripts/presenter.py plan {rel}` — it rejects an anchor that is not found exactly
+once, an unknown id, or a hand gesture. Fix and re-run until clean.
+
+## Narration
+
+{frames}
+"""
+
+
+def _directions_prompt_gestures(video: Path) -> str:
+    """The LongCat-wipe version: hand gestures in the wipe, one per frame."""
     from scripts.utils.script_parser import load_script
     video = Path(video).resolve()
     sd = load_script(video)
@@ -523,6 +613,9 @@ def cmd_prompt(a):
 
 def _look(cfg: dict, where: str) -> str:
     look = (cfg.get('look') or 'A presenter').strip().rstrip('.') + '. '
+    if where == 'ft':
+        return look + ('The presenter is shown head and shoulders in front of a uniform flat chroma-key green '
+                       'background, speaking to the viewer. ')
     if where == 'wipe':
         return look + ('The presenter is shown from the waist up in front of a uniform flat chroma-key green '
                        'background, speaking to the viewer. ')
@@ -544,6 +637,34 @@ def _prompt(cfg: dict, direction: dict, where: str) -> str:
 
 def base_prompt(cfg: dict, where: str) -> str:
     return _look(cfg, where) + (BASE_WIPE if where == 'wipe' else BASE_HOOK) + _style(cfg)
+
+
+# FlashTalk wipe: prompts as trialled (Oct 2026) — expressions read, subtly.
+BASE_FT = 'The presenter talks warmly and clearly, explaining an idea, with natural head movement, small nods and blinks.'
+
+
+def _style_ft(cfg: dict) -> str:
+    return ' The background stays a uniform flat green the whole time. Static camera. ' + (cfg.get('style') or '')
+
+
+def ft_base_prompt(cfg: dict) -> str:
+    return _look(cfg, 'ft') + BASE_FT + _style_ft(cfg)
+
+
+def ft_prompt(cfg: dict, direction: dict) -> str:
+    """FlashTalk prompt for one direction: its face, or a nod (hand gestures are dropped)."""
+    if direction.get('gesture') == 'nod':
+        act = 'The presenter nods firmly twice with an encouraging smile while talking.'
+    else:
+        act = (f"The presenter talks with {FACES[direction.get('face') or 'smile'][1]}, the expression clearly "
+               'showing it, with natural head movement.')
+    return _look(cfg, 'ft') + act + _style_ft(cfg)
+
+
+def ft_schedule(cfg: dict, dirs: list) -> list:
+    """[[start, end, prompt]]: each directed sentence from CUE_LEAD before it to its end."""
+    return [[round(max(0.0, s - CUE_LEAD), 3), round(e, 3), ft_prompt(cfg, d)] for s, e, d in dirs
+            if d.get('face') or d.get('gesture') == 'nod']
 
 
 def segment_prompts(cfg: dict, directions: list, seconds: float, where: str) -> list:
@@ -601,8 +722,9 @@ def _with_resets(cfg: dict, pieces: list, dirs: list, dur: float, where: str) ->
 
 
 def build_plan(video: Path) -> dict:
-    """Hook = the first frame; wipe = one section PER later frame. Each section is one to three
-    LongCat clips, each starting from the presenter at rest. Raises SystemExit on bad directions."""
+    """Hook = the first frame (LongCat: one to three clips, each starting from the presenter at rest);
+    wipe = one section PER later frame (FlashTalk: one clip with the frame's expressions as a prompt
+    schedule; LongCat wipe: one to three clips). Raises SystemExit on bad directions."""
     video = Path(video)
     cfg = config(video)
     dirs, probs = resolve_directions(video)
@@ -614,20 +736,25 @@ def build_plan(video: Path) -> dict:
     hook_dirs = [(s, e, {k: v for k, v in d.items() if k == 'face'}) for s, e, d in dirs.get(first, [])
                  if d.get('face')]
     wipe_frames = []
+    model = cfg.get('wipe_model', 'flashtalk')
     if cfg.get('wipe', True):
         for n, t0, dur in spans[1:]:
             fd = dirs.get(n, [])
+            pieces = ([{'start': 0.0, 'end': round(dur, 3), 'schedule': ft_schedule(cfg, fd)}] if model == 'flashtalk'
+                      else _with_resets(cfg, _pieces(cfg, fd, dur, 'wipe'), fd, dur, 'wipe'))
             wipe_frames.append({'frame': n, 'start': round(t0, 3), 'duration': round(dur, 3),
                                 'audio': str(video / 'audio' / f'frame_{n}.mp3'), 'directions': len(fd),
-                                'pieces': _with_resets(cfg, _pieces(cfg, fd, dur, 'wipe'), fd, dur, 'wipe')})
+                                'pieces': pieces})
     plan = {
         'rev': LONGCAT_REV,
         'presenter': cfg.get('name', 'default'),
         'hook': {'frame': first, 'audio': str(video / 'audio' / f'frame_{first}.mp3'), 'duration': round(hook_dur, 3),
                  'prompt': base_prompt(cfg, 'hook'), 'directions': len(hook_dirs),
                  'pieces': _with_resets(cfg, _pieces(cfg, hook_dirs, hook_dur, 'hook'), hook_dirs, hook_dur, 'hook')},
-        'wipe': {'res': '480p', 'prompt': base_prompt(cfg, 'wipe'),
-                 'start': wipe_frames[0]['start'] if wipe_frames else None, 'frames': wipe_frames},
+        'wipe': ({'model': 'flashtalk', 'rev': FLASHTALK_REV, 'res': 'x'.join(map(str, FT_SIZE)),
+                  'prompt': ft_base_prompt(cfg)} if model == 'flashtalk' else
+                 {'model': 'longcat', 'res': '480p', 'prompt': base_prompt(cfg, 'wipe')})
+                | {'start': wipe_frames[0]['start'] if wipe_frames else None, 'frames': wipe_frames},
         'timeline': [{'frame': n, 'start': round(t, 3), 'duration': round(d, 3)} for n, t, d in spans],
     }
     pd = video / 'presenter'
@@ -637,12 +764,13 @@ def build_plan(video: Path) -> dict:
 
 
 def _sections(video: Path, plan: dict) -> list:
-    """(section, image, resolution, audio, duration, pieces, base prompt) for the hook and every wipe frame."""
+    """(section, image, resolution, audio, duration, pieces, base prompt, model) for the hook and every wipe frame."""
     d = config(video)['dir']
     h, w = plan['hook'], plan['wipe']
-    out = [('hook', d / 'hook.png', '720p', Path(h['audio']), h['duration'], h['pieces'], h['prompt'])]
-    out += [(f"wipe_{f['frame']}", d / 'wipe.png', w['res'], Path(f['audio']), f['duration'], f['pieces'], w['prompt'])
-            for f in w['frames']]
+    model = w.get('model', 'longcat')
+    out = [('hook', d / 'hook.png', '720p', Path(h['audio']), h['duration'], h['pieces'], h['prompt'], 'longcat')]
+    out += [(f"wipe_{f['frame']}", d / ('wipe_head.png' if model == 'flashtalk' else 'wipe.png'), w['res'],
+             Path(f['audio']), f['duration'], f['pieces'], w['prompt'], model) for f in w['frames']]
     return out
 
 
@@ -660,20 +788,26 @@ def _slice(src: Path, start: float, end: float, out: Path) -> Path:
 
 
 def clips(video: Path, plan: dict) -> list:
-    """Every LongCat clip this video needs: (name, digest, job). A clip is current when its saved
+    """Every clip this video needs: (name, digest, job). A clip is current when its saved
     `<name>.digest` matches — a changed direction or re-voiced frame regenerates only its clips."""
     pd = Path(video) / 'presenter'
     pd.mkdir(parents=True, exist_ok=True)
     out = []
-    for sec, image, res, audio, dur, pieces, prompt in _sections(video, plan):
+    for sec, image, res, audio, dur, pieces, prompt, model in _sections(video, plan):
         for k, pc in enumerate(pieces):
             name = f'{sec}_p{k}'
             wav = _slice(audio, pc['start'], pc['end'], pd / f'{name}.wav')
+            if model == 'flashtalk':
+                dg = _digest(plan['wipe']['rev'], res, prompt, pc, wav.read_bytes(), image.read_bytes())
+                out.append((name, dg, {'kind': sec, 'model': 'flashtalk', 'image': image, 'wav': wav, 'audio': wav,
+                                       'prompt': prompt, 'schedule': pc['schedule'], 'key': str(pd / name)}))
+                continue
             dg = _digest(plan['rev'], res, prompt, pc, wav.read_bytes(), image.read_bytes())
             # the demo's FIRST segment uses `prompt` (segment_prompts only drive continuations), so a
             # direction in the first 3.72 s goes in as the clip's prompt or it would be ignored
             first = pc['segment_prompts'][0] if pc['segment_prompts'] and pc['segment_prompts'][0] else prompt
-            out.append((name, dg, {'kind': sec, 'image': image, 'audio': wav, 'prompt': first, 'key': str(pd / name),
+            out.append((name, dg, {'kind': sec, 'model': 'longcat', 'image': image, 'audio': wav, 'prompt': first,
+                                   'key': str(pd / name),
                                    'segment_prompts': pc['segment_prompts'], 'resolution': res}))
     return out
 
@@ -706,6 +840,7 @@ def cmd_plan(a):
         n = sum(len(x[5]) for x in secs)
         split = [x[0] for x in secs if len(x[5]) > 1]
         nd = plan['hook']['directions'] + sum(f['directions'] for f in plan['wipe']['frames'])
+        print(f"  {v}: wipe = {plan['wipe'].get('model', 'longcat') if plan['wipe']['frames'] else 'none'}")
         if not directions_path(v).exists():
             print(f'  ⚠ {v}: no presenter/directions.json — the presenter will only talk (presenter.py prompt)')
         print(f"✓ {v}: {len(secs)} sections, {n} clips, {nd} directions; split before a gesture: "
@@ -716,7 +851,7 @@ def assemble_sections(video: Path, plan: dict):
     """<section>_green.mp4 from its pieces: trimmed to the section and cross-faded (XFADE) where
     they overlap — both sides at rest, over the same audio, so the join does not show."""
     pd = Path(video) / 'presenter'
-    for sec, _, _, _, dur, pieces, _ in _sections(video, plan):
+    for sec, _, _, _, dur, pieces, _, _ in _sections(video, plan):
         out = pd / f'{sec}_green.mp4'
         srcs = [pd / f'{sec}_p{k}_green.mp4' for k in range(len(pieces))]
         # each piece runs until the next one has faded in (a reset piece cuts the one before it short)
@@ -800,9 +935,10 @@ def build_wipe_window(video: Path, plan: dict) -> Path:
 
 
 def cmd_generate(a):
-    """Every missing/stale clip of every video, each in its own LongCat container, all at once; then
-    the sections are assembled and the corner window built."""
-    import longcat_avatar_modal
+    """Every missing/stale clip of every video: each LongCat clip (the hooks; a LongCat wipe) in its own
+    container, all in parallel; then each video's FlashTalk wipe clips in ONE container per video, the
+    videos in parallel (~3 min of start-up per container, then ~2.9 s of H100 per second of video).
+    Then the sections are assembled and the corner window built."""
     jobs, plans = [], {}
     for v in map(Path, a.videos):
         if not enabled(v):
@@ -814,19 +950,35 @@ def cmd_generate(a):
         pd = v / 'presenter'
         for name, dg, job in clips(v, plans[v]):
             if a.force or not _current(pd, name, dg):
-                jobs.append({**job, 'name': name, 'digest': dg, 'pd': pd})
+                jobs.append({**job, 'name': name, 'digest': dg, 'pd': pd, 'video': v})
+    lc = [j for j in jobs if j['model'] == 'longcat']
+    ft = [j for j in jobs if j['model'] == 'flashtalk']
     secs = sum(_probe(j['audio']) for j in jobs)
-    print(f'  {len(jobs)} clip(s) to generate, {secs:.0f} s of presenter')
+    print(f'  {len(jobs)} clip(s) to generate ({len(lc)} LongCat, {len(ft)} FlashTalk), {secs:.0f} s of presenter')
+    res = []
+    # LongCat first, then FlashTalk: two Modal apps driven from parallel threads can hang
+    if lc:
+        import longcat_avatar_modal
+        res += longcat_avatar_modal.run_presenters(lc)
+    if ft:
+        import flashtalk_modal
+        by_image = {}                       # one picture per call; one container per video
+        for j in ft:
+            by_image.setdefault(str(j['image']), {}).setdefault(j['video'], []).append(j)
+        for image, batches in by_image.items():
+            res += flashtalk_modal.run_wipe_batches(Path(image), list(batches.values()), FT_SIZE)
+    done = {r['key']: r for r in res}
     bad = 0
-    if jobs:
-        for job, r in zip(jobs, longcat_avatar_modal.run_presenters(jobs)):
-            if 'mp4' not in r:
-                bad += 1
-                print(f"  ✗ {job['key']}: rc={r['returncode']}\n{r['log_tail'][-1500:]}")
-                continue
-            (job['pd'] / f"{job['name']}_green.mp4").write_bytes(r['mp4'])
-            (job['pd'] / f"{job['name']}.digest").write_text(job['digest'])
-            print(f"  ✓ {job['key']}: {r['segments']} segments in {r['seconds']:.0f}s")
+    for job in lc + ft:
+        r = done.get(job['key'], {})
+        if 'mp4' not in r:
+            bad += 1
+            print(f"  ✗ {job['key']}: rc={r.get('returncode')}\n{(r.get('log_tail') or r.get('error') or '')[-1500:]}")
+            continue
+        (job['pd'] / f"{job['name']}_green.mp4").write_bytes(r['mp4'])
+        (job['pd'] / f"{job['name']}.digest").write_text(job['digest'])
+        what = f"{r['segments']} segments" if 'segments' in r else f"{r['chunks']} chunks"
+        print(f"  ✓ {job['key']}: {what} in {r['seconds']:.0f}s")
     for v, plan in plans.items():
         if not readiness(v):
             assemble_sections(v, plan)
@@ -869,6 +1021,8 @@ def hand_check(video: Path) -> list:
     first = frame_numbers(video)[0]
     out = []
     for n, ds in sorted(dirs.items()):
+        if n != first and not gestures_in_wipe(video):
+            continue                        # a FlashTalk wipe is head and shoulders: no hands to check
         where, sec = ('hook', 'hook') if n == first else ('wipe', f'wipe_{n}')
         clip = pd / f'{sec}_green.mp4'
         g = [(s, e, d) for s, e, d in ds if d.get('gesture') not in (None, 'nod')]
@@ -975,7 +1129,10 @@ def main():
     p = sp.add_parser('enable', help='opt a lecture in (writes pipeline/<L>/presenter.json)')
     p.add_argument('lecture')
     p.add_argument('--name', default='default')
-    p.add_argument('--no-wipe', action='store_true', help='hook only: no corner window after the first frame')
+    g = p.add_mutually_exclusive_group()
+    g.add_argument('--no-wipe', action='store_true', help='hook only: no corner window after the first frame')
+    g.add_argument('--longcat-wipe', action='store_true',
+                   help='LongCat corner window (waist up, hand gestures; ~6x the cost) instead of FlashTalk')
     p.set_defaults(fn=cmd_enable)
     p = sp.add_parser('prompt', help='the directions prompt for a subagent')
     p.add_argument('video')

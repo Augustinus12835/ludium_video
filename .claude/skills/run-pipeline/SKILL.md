@@ -179,7 +179,7 @@ Skip any step whose output already exists. Book and PPTX sources arrive with
 
 6. **Presenter (only with `--presenter` / `--presenter-hook-only`).** Before any frame is
    authored: `venv/bin/python scripts/presenter.py enable pipeline/<L>` (add `--no-wipe` for
-   hook-only). Setup and the per-video steps: [references/presenter.md](references/presenter.md).
+   hook-only). The corner window is FlashTalk (head and shoulders, expressions); LongCat makes the hook. Setup and the per-video steps: [references/presenter.md](references/presenter.md).
 
 ### Phase B (per video) — B1 scripting → review relay → B2 production
 

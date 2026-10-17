@@ -169,16 +169,19 @@ Narration-first documentary with a Remotion "book of plates" visual track. Playb
 ### On-screen presenter (optional, opt-in)
 
 A lip-synced presenter made from ONE photo, for any mode (`/run-pipeline … --presenter`;
-playbook `.claude/skills/run-pipeline/references/presenter.md`). LongCat-Video-Avatar 1.5 on
-Modal (`scripts/longcat_avatar_modal.py`) renders it on chroma green; `scripts/presenter.py`
-plans, generates and keys it. Example: https://www.youtube.com/watch?v=UWV9QqnKZC8 (Japanese).
+playbook `.claude/skills/run-pipeline/references/presenter.md`). Rendered on chroma green on
+Modal — the hook by LongCat-Video-Avatar 1.5 (`scripts/longcat_avatar_modal.py`), the corner
+window by SoulX-FlashTalk-14B (`scripts/flashtalk_modal.py`); `scripts/presenter.py` plans,
+generates and keys it. Example: https://www.youtube.com/watch?v=UWV9QqnKZC8 (Japanese).
 
-- **Hook** = the first frame, the presenter large on the right (x ≥ 1180 px, 720p, H200);
-  **wipe** = every later frame, a 380 px window bottom-right (x ≥ 1504, y ≥ 664 px), ONE 480p
-  clip per frame (H100), so the presenter resets to rest where the frame changes.
-  `enable --no-wipe` = hook only.
+- **Hook** = the first frame, the presenter large on the right (x ≥ 1180 px; LongCat 720p, H200),
+  face-only; **wipe** = every later frame, a 380 px window bottom-right (x ≥ 1504, y ≥ 664 px),
+  head and shoulders — FlashTalk 480×480, ONE clip per frame, all of a video's clips in ONE H100
+  container: lip-sync, expressions, nods, no hands. `enable --no-wipe` = hook only;
+  `enable --longcat-wipe` = the older waist-up LongCat window with hand gestures (~6× the cost,
+  gestures unreliable: sticky poses, ghost hands, drawn-in captions in long clips).
 - **Opt-in per lecture:** `presenter.py setup PHOTO` once (rembg cut-out →
-  `inputs/presenter/<name>/hook.png` + `wipe.png` on green + `presenter.json` with a `look`
+  `inputs/presenter/<name>/hook.png` + `wipe_head.png` (+ `wipe.png` for a LongCat wipe) on green + `presenter.json` with a `look`
   sentence), then `presenter.py enable pipeline/<L>` BEFORE frames are authored. The marker
   `pipeline/<L>/presenter.json` is what every hook checks; without it nothing changes.
 - **Zones are reserved where visuals are authored:** `render_step_prompt.py manim` appends a
@@ -187,18 +190,18 @@ plans, generates and keys it. Example: https://www.youtube.com/watch?v=UWV9QqnKZ
   step aside (`data.presenter` in `folio.tsx`), and `audit_frames.py` / `folio.py still`
   outline the live zone in red on their stills.
 - **Directed, not decorative:** `presenter.py prompt` → a subagent writes
-  `Video-N/presenter/directions.json` (`{frame, anchor, gesture?, face?}` on a verbatim phrase;
-  gestures/faces each with a teaching job; ONE gesture per frame — LongCat holds a pose once
-  taken; the hook face-only). `presenter.py plan` gates it and splits a frame just before its
-  gesture so it lands early in a clip.
+  `Video-N/presenter/directions.json` (`{frame, anchor, face?, gesture?}` on a verbatim phrase;
+  faces each with a teaching job, `nod` the only gesture with a FlashTalk wipe — it switches its
+  prompt per 1.12 s chunk; the hook face-only). `presenter.py plan` gates it. (LongCat wipe: hand
+  gestures, ONE per frame — it holds a pose once taken — and a split just before the gesture.)
 - **Clips are digest-cached** (audio + direction + picture + prompt): only changed frames
-  regenerate. `presenter.py hands` flags a hand left floating after its gesture; `reset` adds
-  one cross-faded clip from rest.
+  regenerate. (LongCat wipe only: `presenter.py hands` flags a hand left floating after its
+  gesture; `reset` adds one cross-faded clip from rest.)
 - **Compile** (`compile_video.py`, `folio.py compile`) refuses while a clip is missing or stale,
   then keys hook + window over the cut; `final_video_board.mp4` keeps the visuals-only cut and
   `--no-presenter` compiles only that.
-- **Cost:** hook ≈ US$0.075/s; wipe ≈ US$0.02/s + ~2 min model load per clip — ≈ US$16 per
-  10-minute video (hook only ≈ US$2.40).
+- **Cost:** hook ≈ US$0.075/s (≈ US$2.40 for 30 s); FlashTalk wipe ≈ US$0.003/s + ~3 min start-up
+  per video (≈ US$2.50 per 10 min) — ≈ US$5 per 10-minute video (a LongCat wipe ≈ US$16).
 
 ### Recompiling Video
 
@@ -424,7 +427,8 @@ fallback transcription — compile and subtitle must run serially.
 | `folio.py` | Folio: place · audit · assets · refinish · grid · contact · prompt · still · lint · render · sheet · compile · status |
 | `folio_motion.py` | Folio motion plates (optional): Three.js proxy → Gemini Omni Flash clip → `<Motion>` (cues · proxy · ref · gen · extend · fit · sheet; kit `scripts/motion_proxy/`) |
 | `presenter.py` | Optional on-screen presenter: setup · enable · prompt · plan · generate · hands · reset · zones (overlay runs inside compile) |
-| `longcat_avatar_modal.py` | LongCat-Video-Avatar 1.5 on Modal (720p H200 / 480p H100, per-segment prompts); `download` once |
+| `longcat_avatar_modal.py` | LongCat-Video-Avatar 1.5 on Modal — the presenter hook (720p H200; 480p H100 for an opt-in LongCat wipe), per-segment prompts; `download` once |
+| `flashtalk_modal.py` | SoulX-FlashTalk-14B on Modal — the presenter's corner window (480×480 H100, one container per video, prompt schedule per 1.12 s chunk); `download` once |
 | `obp_pdf_to_markdown.py` | Open-textbook PDF (text layer) → per-section markdown + footnotes + `sections.json` |
 | `generate_subtitles.py` | SRT subtitles from stored word timestamps (Scribe fallback) |
 | `audit_script.py` | Mechanical script QA before review: cues, margins, gaps, scope gate, TTS; folio dossier checks; `--argument` (`--self-test`) |
