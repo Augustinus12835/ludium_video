@@ -1,186 +1,140 @@
 # Ludium Video
 
-An AI pipeline that turns lectures and books into narrated educational videos,
-driven end to end from [Claude Code](https://claude.com/claude-code):
+An AI pipeline that turns lectures and books into narrated educational videos, driven end to end
+from [Claude Code](https://claude.com/claude-code).
 
-- **Math and technical** (calculus, linear algebra, physics, finance, CS): every
-  frame a Manim animation, every calculation checked with SymPy.
-- **Humanities** (history, philosophy, literature): ~20-minute documentary
-  episodes in the look of an illustrated book of engravings (**folio** mode).
+| Mode | For | Visuals |
+|---|---|---|
+| `--math` / `--technical` | calculus, linear algebra, physics, finance, CS | Manim animation per frame; every calculation checked with SymPy |
+| `--folio` | history, philosophy, literature | ~20-min documentary episodes as an illustrated book of engravings |
 
-Narration is synthesized with your choice of ElevenLabs, Cartesia, HeyGen or
-**Drama 3**, an open-weights model you run on a [Modal](https://modal.com) GPU, and
-animations and subtitles sync to it word by word.
+Narration comes from ElevenLabs, Cartesia, HeyGen or **Drama 3** (open weights, on your own
+[Modal](https://modal.com) GPU). Animations and subtitles sync to it word by word.
 
 ## See it
 
-- **[The Video That Made Itself](https://www.youtube.com/watch?v=x-iBXDS6faQ)**:
-  the math/technical pipeline, explained by a video it made. *(The video says you need an
-  ElevenLabs subscription; the TTS provider is now your choice, and high-quality narration can
-  run free on the open-weights Drama 3 model with Modal's monthly compute credit — see
-  "Free narration" below.)*
-- **[From Book to Documentary](https://www.youtube.com/watch?v=v2g8pILvm10)**:
-  the folio pipeline, from a book to a finished film, and how each script and
-  picture is checked.
-- **[Plato's Republic, Episode 1](https://www.youtube.com/watch?v=rkzo8eYfgPY)**:
-  a folio episode made from an open textbook.
-
-More math and technical videos: the [Ludium YouTube channel](https://www.youtube.com/@LudiumAI).
+- **[The Video That Made Itself](https://www.youtube.com/watch?v=x-iBXDS6faQ)**: the math/technical
+  pipeline, explained by a video it made. *(It says you need an ElevenLabs subscription; the
+  provider is now your choice, and Drama 3 can run free — see below.)*
+- **[From Book to Documentary](https://www.youtube.com/watch?v=v2g8pILvm10)**: the folio pipeline,
+  and how each script and picture is checked.
+- **[Plato's Republic, Episode 1](https://www.youtube.com/watch?v=rkzo8eYfgPY)**: a folio episode
+  from an open textbook.
+- More on the [Ludium YouTube channel](https://www.youtube.com/@LudiumAI).
 
 ## How it works
-
-Judgement steps (cleaning, segmenting, scriptwriting, review, frame authoring)
-run as **Claude Code subagents** under your Claude subscription, so there is no
-Anthropic API key and no per-token bill. Deterministic steps (transcription,
-TTS, rendering, compiling, subtitles) run through `scripts/pipeline.py`, which
-is resumable from disk.
 
 ```
 Source → Transcribe → Clean → Segment → per video: Script → Review → TTS → Visuals → Compile → Subtitles
 ```
 
+- **Judgement steps** (clean, segment, script, review, frame authoring) run as Claude Code
+  subagents under your Claude subscription: no Anthropic API key, no per-token bill.
+- **Deterministic steps** (transcribe, TTS, render, compile, subtitles) run through
+  `scripts/pipeline.py`, resumable from disk.
+
 ## Getting started
 
-You need a **Claude subscription** (Pro or Max) and **one TTS provider** — a hosted one, or
-Drama 3 on Modal (see "Free narration" below).
+You need a **Claude subscription** (Pro or Max) and **one TTS provider**.
 
-1. **Install Claude Code:** `curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` and sign in.
-2. **Choose a TTS provider** and get an API key plus the ID of the voice to narrate in:
+1. **Install Claude Code:** `curl -fsSL https://claude.ai/install.sh | bash`, then `claude` and sign in.
+2. **Install the project:** run `claude` and paste
+   `Set up https://github.com/Augustinus12835/ludium_video for me: clone it and install its dependencies.`
+3. **Add your keys:** in `ludium_video`, `cp .env.example .env`, set `TTS_PROVIDER` and that
+   provider's key and voice (any voice works, including a clone of your own):
 
    | `TTS_PROVIDER` | Key | Voice |
    |---|---|---|
    | `elevenlabs` | `ELEVENLABS_API_KEY` (*Text to Speech* enabled) | `ELEVENLABS_VOICE_ID` |
    | `cartesia` | `CARTESIA_API_KEY` | `CARTESIA_VOICE_ID` |
    | `heygen` | `HEYGEN_API_KEY` | `HEYGEN_VOICE_ID` |
-   | `drama3` | a Modal account (`pip install modal && modal setup`) | 1–3 reference clips in `inputs/voice/drama3_refs/` |
+   | `drama3` | a Modal account (see below) | 1–3 clips in `inputs/voice/drama3_refs/` |
 
-   Any voice works, including a clone of your own.
-3. **Install the project:** run `claude` and paste
-   `Set up https://github.com/Augustinus12835/ludium_video for me: clone it and install its dependencies.`
-4. **Add your keys:** in the `ludium_video` folder, `cp .env.example .env`, set
-   `TTS_PROVIDER` and fill in that provider's key and voice.
-5. **Make a video:** inside the folder, run `claude` and type
+4. **Make a video:** inside the folder, run `claude` and type
 
-```
-/run-pipeline https://www.youtube.com/watch?v=... --math        # pure math
-/run-pipeline inputs/my_recording.mp4 --technical               # science, finance, CS, engineering
-/run-pipeline https://www.youtube.com/watch?v=... --folio       # humanities
-```
+   ```
+   /run-pipeline https://www.youtube.com/watch?v=... --math        # pure math
+   /run-pipeline inputs/my_recording.mp4 --technical               # science, finance, CS, engineering
+   /run-pipeline https://www.youtube.com/watch?v=... --folio       # humanities
+   ```
 
-Sources can be a YouTube URL, a video or audio file, a PDF or Markdown book
-chapter, or a PPTX deck, including your own lectures
-(`.claude/skills/run-pipeline/references/sources.md`). Finished videos land in
-`pipeline/<source>/Video-N/final_video.mp4` with subtitles beside them.
+Sources: a YouTube URL, a video or audio file, a PDF or Markdown book chapter, or a PPTX deck
+(`.claude/skills/run-pipeline/references/sources.md`). Output:
+`pipeline/<source>/Video-N/final_video.mp4` with subtitles beside it.
+
+**Transcription (only for audio/video files or YouTube videos without captions):** add
+`ELEVENLABS_API_KEY` with *Speech to Text* enabled for Scribe (~US$0.22/hour, pay as you go);
+without it, local files fall back to Whisper (`pip install openai-whisper`).
 
 ## Free narration: Drama 3 on Modal
 
-[Fish Audio Drama 3](https://huggingface.co/fishaudio/drama-3) is an open-weights TTS model that
-clones a voice zero-shot from a few short clips. `TTS_PROVIDER=drama3` runs it on a rented
-[Modal](https://modal.com) H100 (`scripts/drama3_modal.py`) and force-aligns the result on the
-same GPU, so animations and subtitles get word timestamps exactly as from a hosted provider.
+[Fish Audio Drama 3](https://huggingface.co/fishaudio/drama-3) clones a voice zero-shot from a few
+clips. `scripts/drama3_modal.py` runs it on a Modal H100 and force-aligns the words on the same GPU,
+so you get word timestamps as from a hosted provider. Modal's free **US$30/month** credit covers
+**~500 ten-minute videos** when batched (`/run-pipeline` voices a whole lecture per session):
 
-**Why it matters:** Modal's Starter plan includes **US$30 of free compute every month**, and the
-model's weights (~40 GB) sit within Modal's 1 TiB of free storage. With Claude Code doing every
-judgement step under your subscription and Manim rendering on your own machine, **math and
-technical video production — even at large volume — is essentially free.**
-
-| What | Cost on Modal (our runs, Oct 2026) |
+| Cost (Oct 2026) | |
 |---|---|
-| Session start-up (load weights, ~3–4 min of H100) | ~US$0.25, paid once per batch |
-| Narration, 16 requests in flight | ~US$0.02 per 10 minutes |
-| One 10-minute video on its own | ~US$0.27 |
-| One 10-minute video in a batch of ~8 | ~US$0.05 |
-| **US$30 free credit, batched** | **~500–600 ten-minute videos a month (~100 hours of narration)** |
+| Session start-up (~3–4 min) | ~US$0.25 per batch |
+| Narration | ~US$0.02 per 10 min |
+| 10-min video, alone / in a batch of ~8 | ~US$0.27 / ~US$0.05 |
+| Hosted provider, for comparison | ~US$0.35 |
 
-For comparison, a hosted provider at ~US$40 per million characters costs about US$0.35 for the
-same 10-minute video. Batching is what keeps it cheap: `/run-pipeline` voices a whole lecture in
-one session (`scripts/tts_drama3_batch.py`), and pairs a lecture of 4 or fewer videos with the next.
+**Setup, once:**
 
-Setup, once:
+1. `pip install modal && modal setup`
+2. `python scripts/drama3_modal.py download` (weights, ~40 GB, to a Modal Volume)
+3. Add 1–3 clips to `inputs/voice/drama3_refs/`: `ref_1.wav` + `ref_1.txt` (exact transcript),
+   ≤ 60 s of clean speech each. Say any rare names in a clip, or they may vary.
+4. `TTS_PROVIDER=drama3` in `.env`. Optional: `DRAMA3_TAGS=1` lets a subagent add inline stress
+   (`<emphasis>`, `<slow>`, `[pause]`) without changing the words.
 
-1. `pip install modal && modal setup` (free account; credentials go to `~/.modal.toml`).
-2. `python scripts/drama3_modal.py download` copies the weights to a Modal Volume (minutes, CPU only).
-3. Put 1–3 clips of the narrator in `inputs/voice/drama3_refs/`: `ref_1.wav` + `ref_1.txt` (its exact
-   transcript), up to 60 s each, clean speech in the delivery you want. Record yourself, or render
-   the clips once from a hosted voice you like — the clone copies their timbre, pacing and
-   pronunciation (rare names it never hears may vary between frames, so include them in a clip).
-4. Set `TTS_PROVIDER=drama3` in `.env`.
-
-Optional: `DRAMA3_TAGS=1` adds a subagent step that marks a few words per frame with Drama 3's
-inline delivery controls — `<emphasis>`, `<slow>`, `[pause]` — so the narrator stresses the
-word an idea turns on, like a teacher at the board. The spoken words never change.
-
-Drama 3 is under the [Fish Audio Community License](https://huggingface.co/fishaudio/drama-3):
-free for research and for commercial use while your annual revenue is under US$500k, with
-"Built with Fish Audio" shown on a related page; clone only voices you have consent to use.
-Modal prices and free credit are as of October 2026 — check [modal.com/pricing](https://modal.com/pricing).
-
-**Transcribing raw audio or video (optional).** YouTube sources use the video's
-captions, and books and decks need no transcription. Only an audio/video file, or a
-YouTube video without captions, has to be transcribed: add `ELEVENLABS_API_KEY`
-with *Speech to Text* enabled for ElevenLabs Scribe (about US$0.22 an hour of audio,
-pay as you go — whichever TTS provider you chose). Without it, local files fall
-back to local Whisper (`pip install openai-whisper`).
+Licence: [Fish Audio Community License](https://huggingface.co/fishaudio/drama-3). Free for
+commercial use under US$500k annual revenue, with a "Built with Fish Audio" credit. Clone only
+voices you have consent to use. Check current prices at [modal.com/pricing](https://modal.com/pricing).
 
 ## On-screen presenter (optional)
 
-Any video, in any mode, can have a **lip-synced presenter made from one photo** of you, a
-colleague who has agreed, or a drawn character. The presenter speaks the narration large beside
-the visuals in the opening hook, then from a small window in the bottom-right corner, and is
-*directed*: a subagent gives chosen sentences a gesture or an expression with a teaching job
-(raise a finger at the key result, point at the screen, wonder aloud at a question). Frames are
-authored around the presenter. Manim and Remotion visuals keep the hook's right side and the
-window's corner clear, and folio captions step aside.
+A **lip-synced presenter from one photo** (you, a consenting colleague, or a drawn character):
+large beside the visuals in the opening hook, then in a bottom-right window. A subagent *directs*
+it, giving sentences a gesture or expression with a teaching job, and frames keep its zones clear.
+Example: [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=URoGEXfxkCs),
+presented by the anime tutor ルミ.
 
-**Example:** [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=URoGEXfxkCs)
-from the [Ludium・ルーディウム](https://www.youtube.com/@LudiumAI) Japanese channel, presented by
-the anime tutor ルミ.
+Runs [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)
+(MIT) on Modal. Off unless you pass `--presenter`.
 
-It runs [LongCat-Video-Avatar 1.5](https://huggingface.co/meituan-longcat/LongCat-Video-Avatar-1.5)
-(MIT) on [Modal](https://modal.com), the same account Drama 3 uses. It's **off unless you ask for it**
-(`/run-pipeline … --presenter`). Setup, once:
+1. `pip install modal 'rembg[cpu]' && modal setup`, then
+   `python scripts/longcat_avatar_modal.py download` (~57 GB).
+2. `python scripts/presenter.py setup my_photo.jpg` writes `inputs/presenter/default/`. Use a sharp,
+   well-lit, front-facing photo, waist up with hands visible. Describe the person in one sentence
+   in `presenter.json` → `"look"`.
 
-1. `pip install modal 'rembg[cpu]' && modal setup`; then
-   `python scripts/longcat_avatar_modal.py download` copies the weights (~57 GB) to a Modal Volume.
-2. `python scripts/presenter.py setup my_photo.jpg` cuts the person out and writes
-   `inputs/presenter/default/` (`hook.png`, full figure; `wipe.png`, upper body; both on chroma
-   green). Use a sharp, well-lit photo, facing the camera, hands visible, ideally waist up or
-   more. Write a one-sentence description of the person in `presenter.json` → `"look"`.
-
-| Cost on Modal (Oct 2026) | |
+| Cost per 10-min video (Oct 2026) | |
 |---|---|
-| Hook (720p, H200) | ~US$0.075 per second, ~US$2.40 for a 30-second hook |
-| Corner window (480p, H100, one clip per frame) | ~US$0.02 per second + ~2 min of model load per clip |
-| **A 10-minute video, hook + window** | **~US$16** |
-| A 10-minute video, hook only (`--presenter-hook-only`) | ~US$2.40 |
+| Hook + window | ~US$16 (the free credit covers about two) |
+| Hook only (`--presenter-hook-only`) | ~US$2.40 |
 
-So the presenter costs far more than the narration: Modal's US$30 monthly credit covers about two
-fully presented 10-minute videos. Clips regenerate only when their narration or direction changes.
-Use only photos of people who have agreed to be presented this way.
+Clips regenerate only when their narration or direction changes.
 
 ## Humanities (folio) setup
 
-Folio also generates images, so it needs two more keys in `.env`:
-
-| Key | Used for |
+| Need | For |
 |---|---|
-| `OPENAI_API_KEY` | engraved plates, portraits and objects — requires `gpt-image-2.5-sunburst` (gpt-image-2.5); there is no fallback model |
-| `GOOGLE_CLOUD_API_KEY` | maps (Gemini with Google Search grounding); optional motion plates (Gemini Omni Flash) |
+| `OPENAI_API_KEY` | plates, portraits, objects (`gpt-image-2.5-sunburst`, no fallback) |
+| `GOOGLE_CLOUD_API_KEY` | grounded maps (Gemini); optional motion plates (Gemini Omni Flash) |
+| Node.js 18+, `cd remotion && npm ci` | rendering with [Remotion](https://www.remotion.dev) |
 
-Plates are 4K canvases (3840×2160) that a camera travels over, and images cost roughly
-**US$10–12 per 20-minute episode**. Moving plates (`scripts/folio_motion.py`) are optional
-and off by default (~US$1.10 per 10-second clip). Rendering uses
-[Remotion](https://www.remotion.dev): install Node.js 18+, then
-`cd remotion && npm ci`. A book can be divided into episodes with a manifest;
-`docs/examples/plato_republic_episodes.json` is a worked example.
+Images cost ~US$10–12 per 20-minute episode. Motion plates (`scripts/folio_motion.py`) are off by
+default (~US$1.10 per 10 s). To split a book into episodes, write a manifest like
+`docs/examples/plato_republic_episodes.json`.
 
 ## More
 
-- `CLAUDE.md`: modes, day-to-day workflows (fixing a frame, re-voicing a
-  sentence, subtitles) and the script reference.
+- `CLAUDE.md`: modes, everyday fixes (a frame, a sentence, subtitles), script reference.
 - `.claude/skills/run-pipeline/`: the playbooks the supervisor skill follows.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled fonts are under the SIL Open Font License /
-Apache 2.0 (`remotion/public/fonts/licenses/`).
+MIT, see [LICENSE](LICENSE). Bundled fonts: SIL Open Font License / Apache 2.0
+(`remotion/public/fonts/licenses/`).
