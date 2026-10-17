@@ -71,6 +71,16 @@ After TTS (folio: after the word timeline):
    a hand still raised in most "after" tiles is a floating hand. Fix it with
    `presenter.py reset pipeline/<L>/Video-N <frame> […]` and then `generate` again. That adds one clip
    from the resting picture where the sentence ends, cross-faded in, and the other clips are kept.
+
+   Two defects the hand check cannot see — look for them on the sheets yourself:
+   - **Ghost hand:** during a one-handed gesture, the resting (clasped) hands stay at the waist as
+     well, so she has three hands. Look at the waist in one full-res still mid-gesture: ONE hand
+     there is right, two clasped hands is the ghost. Fix: drop that direction's `gesture` (keep
+     `face`), `generate`. Rerolling did not clear it.
+   - **Drawn-in captions** late in a long clip (seen ~99 s into a 109 s frame): pseudo-text across the
+     body, light on green, so it survives the key. Tile the last ~20 s of every long clip
+     (`fps=1/3,tile`) and look at the bottom third. Fix: put `"reset": true` on a direction whose
+     sentence ends before the text appears, then `generate`. Only that new tail clip is generated.
 5. **Compile** as usual. `compile_video.py` / `folio.py compile` refuse while a clip is missing or
    stale, then key hook + window over the cut (`final_video_board.mp4` = visuals only;
    `--no-presenter` compiles just that for a quick look). Extract a still in the hook and one in a
@@ -81,5 +91,8 @@ After TTS (folio: after the word timeline):
 - **A frame's visuals under the presenter:** fix the frame or scene source (it was authored outside
   its zone), re-render, recompile. The presenter clips are not touched.
 - **A direction:** edit `presenter/directions.json`, then `generate` (only that frame's clips) and compile.
+- **A mispronounced sentence:** `fix_tts_sentence.py` swaps it at zero shift and re-stamps that frame's
+  clips as current (the lip-sync drifts inside the one sentence only), so nothing regenerates; just
+  recompile. `--regenerate-presenter` leaves them stale if you would rather pay for exact lip-sync.
 - **The look or the pictures:** edit `presenter.json` / replace `hook.png` / `wipe.png`. Every clip is
   then stale, which costs a full regeneration.

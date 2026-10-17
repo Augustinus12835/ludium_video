@@ -21,6 +21,12 @@ Workflow:
      (subtitles regenerate from the updated word timestamps).
 
 It backs up each frame's audio + timestamps to *.prefix.bak before changing them.
+
+Presenter lectures (`presenter.py enable`): the clips are digest-cached on their audio, so a splice
+would make every clip of the frame stale and cost a LongCat regeneration. By default the clips that
+were current before the fix are re-stamped current — the lip-sync drifts a little inside the swapped
+sentence only, which is far better than a mispronunciation. `--regenerate-presenter` leaves them
+stale instead (then `presenter.py generate`).
 """
 import argparse
 import json
@@ -288,6 +294,9 @@ def main():
                          "audio/tts_meta.json (provider + voice + model), else ELEVENLABS_VOICE_ID "
                          "from .env. Pass the video's actual ElevenLabs voice for a video voiced "
                          "before tts_meta.json existed in a voice other than the .env default.")
+    ap.add_argument("--regenerate-presenter", action="store_true",
+                    help="Presenter lectures: leave the spliced frames' clips stale (regenerate them with "
+                         "presenter.py generate) instead of re-stamping them current.")
     ap.add_argument("--resay", action="append", default=None,
                     help="Force re-synthesis of the sentence whose text matches this, in --voice-id, "
                          "at its original span (text unchanged). Repeatable. For voice repairs.")
@@ -312,11 +321,25 @@ def main():
 
     frames = args.frame if args.frame else sorted(script_frames)
     print(f"{vd}  ({len(frames)} frame(s) to check){'  [DRY RUN]' if args.dry_run else ''}")
+    restamp = None
+    if not args.dry_run and not args.regenerate_presenter:
+        from scripts import presenter as _pr
+        if _pr.enabled(vd) and _pr.config(vd).get('look'):
+            pd = vd / 'presenter'
+            restamp = {nm for nm, dg, _ in _pr.clips(vd, _pr.build_plan(vd)) if _pr._current(pd, nm, dg)}
     n = 0
     for f in frames:
         if fix_frame(vd, f, script_frames, math_data, dry=args.dry_run,
                      voice_id=args.voice_id, resay=args.resay):
             n += 1
+    if restamp and n:
+        stamped = []
+        for nm, dg, _ in _pr.clips(vd, _pr.build_plan(vd)):
+            if nm in restamp and not _pr._current(pd, nm, dg):
+                (pd / f'{nm}.digest').write_text(dg)
+                stamped.append(nm)
+        if stamped:
+            print(f"  presenter clips kept (digests re-stamped): {', '.join(stamped)}")
     print(f"\n{'Would fix' if args.dry_run else 'Fixed'} {n} frame(s). "
           f"{'' if args.dry_run else 'Recompile: python scripts/compile_video.py ' + str(vd)}")
 
