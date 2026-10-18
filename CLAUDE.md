@@ -172,7 +172,7 @@ A lip-synced presenter made from ONE photo, for any mode (`/run-pipeline … --p
 playbook `.claude/skills/run-pipeline/references/presenter.md`). Rendered on chroma green on
 Modal — the hook by LongCat-Video-Avatar 1.5 (`scripts/longcat_avatar_modal.py`), the corner
 window by SoulX-FlashTalk-14B (`scripts/flashtalk_modal.py`); `scripts/presenter.py` plans,
-generates and keys it. Example: https://www.youtube.com/watch?v=UWV9QqnKZC8 (Japanese).
+generates and keys it. Example: https://www.youtube.com/watch?v=lp75FjCqTZ0 (Japanese).
 
 - **Hook** = the first frame, the presenter large on the right (x ≥ 1180 px; LongCat 720p, H200),
   face-only; **wipe** = every later frame, a 380 px window bottom-right (x ≥ 1504, y ≥ 664 px),
