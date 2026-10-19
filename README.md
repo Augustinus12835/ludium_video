@@ -115,7 +115,7 @@ Runs on Modal: the hook on [LongCat-Video-Avatar 1.5](https://huggingface.co/mei
 
 | Cost per 10-min video (Oct 2026) | |
 |---|---|
-| Hook + window | ~US$16 (the free credit covers about two) |
+| Hook + window (FlashTalk) | ~US$5 (a LongCat window ~US$16) |
 | Hook only (`--presenter-hook-only`) | ~US$2.40 |
 
 Clips regenerate only when their narration or direction changes.
