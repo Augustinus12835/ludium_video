@@ -127,6 +127,9 @@ scenes, 6–10 images per minute overall** (a 20-minute video ≈ 120–200 asse
   (≤ 8, real spellings). One map per region per video, re-used with different pins/routes.
   A map inherited from an earlier episode may be re-prompted (new `places`, wider region):
   give it a NEW id (`med_map_e02`) rather than editing a `shared` asset.
+  An UNLETTERED map (no `places`) that must carry no writing at all may set `"redraw": true`:
+  the grounded map is redrawn on gpt-image with no lettering (the geography is traced) and the
+  scene puts the names on as timed overlays. Use it when the grounded map keeps lettering names.
 - **then-state** — any asset with `"of": "<base id>"` is re-drawn from the base image with
   only the change you describe ("the same temple, now roofless and burnt"; "the same roll,
   now torn to three scraps"). Same framing, so it cross-dissolves in place.

@@ -171,7 +171,12 @@ editing the asset's `prompt` (positive wording — a negative paints its token) 
 and objects always stay on gpt-image-2.5. A plate drawn with a paper frame retries once
 automatically with a full-bleed nudge. Image EDITS (`of` then-states) cannot reliably remove a figure or change a
 count — for those, drop `of` and generate a fresh image. Maps are grounded Gemini Pro; fix
-their `places`/prompt instead. A manual `trim: [l, t, r, b]` (fractions of the
+their `places`/prompt instead. **Map redraw (opt-in):** grounded Gemini can keep lettering place
+names on a map meant to be unlettered. `"redraw": true` on that map (or `"map_redraw": true` in
+folio.json for every unlettered map) adds a second pass: the grounded map is redrawn on
+gpt-image-2.5 with no writing, geography traced from it; the original stays at
+`raw/<id>.grounded.png` and is reused on re-runs, so switching the pass on for a map already
+made costs one gpt-image call, not a new Gemini one. A manual `trim: [l, t, r, b]` (fractions of the
 raw) crops a stubborn paper margin.
 
 ## Stage 3b — presenter (only when `pipeline/<L>/presenter.json` exists)

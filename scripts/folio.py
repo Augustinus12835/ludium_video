@@ -126,6 +126,21 @@ KIND_CLAUSE = {
 ASPECT = {"plate": "16:9", "portrait": "3:4", "object": "1:1", "map": "16:9"}
 FULL_BLEED_RETRY = ("\n\nThe picture is cut by the edges of the sheet like a detail of a larger "
                     "engraving: its hatching and forms run straight off all four edges.")
+# Optional second pass for unlettered maps: grounded Gemini Pro gets the geography right but
+# can keep lettering place names (in English, or where you wanted none) even when told not to.
+# With the pass on, the grounded map is handed to gpt-image as the reference and redrawn with
+# no writing — the geography comes through traced; labels go on as timed overlays in the scene.
+# OPT-IN: `"redraw": true` on an unlettered map, or `"map_redraw": true` in folio.json for every
+# unlettered map (`"redraw": false` on one map opts it out). The grounded original stays at
+# raw/<id>.grounded.png and is reused on re-runs (no second Gemini call).
+MAP_REDRAW_PROMPT = (
+    "Redraw this map as an antique sepia steel-engraved map, keeping EXACTLY the same geography, "
+    "coastlines, lakes, rivers, islands, mountains and framing as the reference: the reference is "
+    "geographically correct, so copy its shapes faithfully. Fine engraved hatching for sea and "
+    "relief, cream paper. The map carries no writing of any kind: clean water and land, every "
+    "former label area filled with the same engraved sea or land texture.")
+
+
 MAP_PREAMBLE = (
     "Before drawing, use Google Search to verify the real geography of the places named "
     "below: their true relative positions, the real shapes of the coastlines, islands and "
@@ -457,6 +472,20 @@ def make_image(prompt: str, aspect: str, tier: str, refs=(), grounding=False, ca
     return gemini_image(prompt, aspect, model, refs, grounding, image_size="4K" if canvas == "4k" else "2K")
 
 
+def map_redraw(folio: dict, a: dict) -> bool:
+    """Whether an unlettered map gets the gpt-image redraw pass (MAP_REDRAW_PROMPT). Opt-in."""
+    if a.get("places"):
+        return False   # a lettered map keeps Gemini's grounded lettering
+    if "redraw" in a:
+        return bool(a["redraw"])
+    return bool(folio.get("map_redraw", False))
+
+
+def redraw_map(grounded: Path, canvas) -> bytes:
+    size = "x".join(map(str, CANVAS[canvas])) if canvas in CANVAS else None
+    return gpt_image(MAP_REDRAW_PROMPT, "16:9", TIERS["gpt"], refs=[grounded], size=size)
+
+
 def asset_tier(a: dict, kind: str) -> str:
     return "pro" if kind == "map" else "gpt"
 
@@ -727,8 +756,31 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     kd = {"p": prompt, "m": model, "k": kind, "refs": [sha(r) for r in key_refs], "seed": a.get("seed", 0)}
     if canvas:
         kd["canvas"] = canvas   # only when set, so existing keys stay valid
+    grounded_key = json.dumps(kd, sort_keys=True)
+    redraw = kind == "map" and map_redraw(folio, a)
+    if redraw:
+        kd["redraw"] = MAP_REDRAW_PROMPT   # only when set, so existing keys stay valid
     key = json.dumps(kd, sort_keys=True)
     keyf = out.with_suffix(out.suffix + ".key")
+    if redraw and not force:
+        gpng, gkey = raw_dir / f"{a['id']}.grounded.png", raw_dir / f"{a['id']}.grounded.key"
+        if not (gpng.exists() and gkey.exists()) and keyf.exists() and keyf.read_text() == grounded_key \
+                and (raw_dir / f"{a['id']}.png").exists():
+            # made before the redraw was switched on: its raw IS the grounded map — no new Gemini call
+            gpng.write_bytes((raw_dir / f"{a['id']}.png").read_bytes())
+            gkey.write_text(grounded_key)
+        current = out.exists() and keyf.exists() and keyf.read_text() == key
+        if gpng.exists() and gkey.exists() and gkey.read_text() == grounded_key and not current:
+            t0 = time.time()
+            try:
+                raw = redraw_map(gpng, canvas)
+            except Exception as e:  # noqa: BLE001
+                return a["id"], f"FAIL redraw {e}"
+            (raw_dir / f"{a['id']}.png").write_bytes(raw)
+            finish_and_record(vd, folio, a, raw)
+            (vd / ASSET_DIR / f"{a['id']}.model").write_text(f"{tier}+gpt-redraw")
+            keyf.write_text(key)
+            return a["id"], f"ok map redraw (grounded map reused) {time.time() - t0:.0f}s"
     if out.exists() and keyf.exists() and keyf.read_text() == key and not force:
         return a["id"], "cached"
     lib = library_dir(vd) / a["id"] if a.get("shared") else None
@@ -755,6 +807,14 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
             note += f" ({t_} failed: {str(e)[:80]})"
             continue
         used = t_
+        if redraw:
+            (raw_dir / f"{a['id']}.grounded.png").write_bytes(raw)
+            (raw_dir / f"{a['id']}.grounded.key").write_text(grounded_key)
+            try:
+                raw = redraw_map(raw_dir / f"{a['id']}.grounded.png", canvas)
+                used = f"{t_}+gpt-redraw"
+            except Exception as e:  # noqa: BLE001
+                return a["id"], f"FAIL redraw {e} (grounded map kept in raw/)"
         (raw_dir / f"{a['id']}.png").write_bytes(raw)
         FRAMED.discard(a["id"])
         finish_and_record(vd, folio, a, raw)
