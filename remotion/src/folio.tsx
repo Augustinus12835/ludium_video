@@ -300,6 +300,10 @@ const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: num
 
 const CAPTION_LEAD = 0.2; // show a caption slightly before its first word
 const CAPTION_HOLD = 1.4; // keep it after its last word unless the next arrives
+// The highlight runs a little AHEAD of the voice. Word timings match the audio within ~20 ms, but a
+// highlight that turns at the exact onset reads as late (a short word is gone before the eye finds it, and
+// aligners run slightly late inside a phrase until the next pause). Karaoke convention: lead it.
+const KARAOKE_LEAD = 0.15;
 
 const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; presenter?: PresenterInfo}> = ({groups, T, night, presenter}) => {
   let gi = -1;
@@ -331,7 +335,8 @@ const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; pre
       }}>
         {g.words.map((w, i) => {
           const nextS = i + 1 < g.words.length ? g.words[i + 1].s : w.e + 0.35;
-          const color = T < w.s ? upcoming : T < nextS ? current : spoken;
+          const Tk = T + KARAOKE_LEAD;
+          const color = Tk < w.s ? upcoming : Tk < nextS ? current : spoken;
           return <span key={i} style={{color}}>{w.w}{i + 1 < g.words.length ? ' ' : ''}</span>;
         })}
       </div>
