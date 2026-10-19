@@ -110,6 +110,21 @@ HOUSE_STYLE = (
     "picture: every surface is drawing or plain paper."
 )
 
+# On-screen presenter (scripts/presenter.py, opt-in): the hook frame shows the presenter full-figure
+# on the RIGHT, the rest of the film a head-and-shoulders window in the TOP-RIGHT corner. A hook
+# plate continues its scene behind the figure (it stands inside the picture, never on blank paper);
+# every other plate keeps its upper-right corner calm. Positive wording only: say what fills them.
+HOOK_COMPOSITION = (
+    "Composition for a picture with a narrator standing in front of its right side: the "
+    "subject and all the action sit in the left three-fifths of the picture. The right "
+    "two-fifths continue the same scene as a calm, open stretch of it, drawn in full, quiet "
+    "hatching — sky over distant hills, a plain wall, an empty courtyard, a field running "
+    "back to a tree line — so that a person standing there would stand inside the scene. The "
+    "hatching runs out to the right edge like everywhere else.")
+WIPE_CORNER = (
+    "The upper right corner of the picture is a calm area of sky, wall, foliage or distance "
+    "in light hatching; faces, figures and the focal subject sit away from it.")
+
 KIND_CLAUSE = {
     "plate": ("Composition: a full-bleed wide landscape picture whose hatching runs out to all four "
               "edges of the sheet, with a clear focal subject and a readable depth of field."),
@@ -182,6 +197,9 @@ def likeness_sheet(portrait_raw: Path, mirror: bool = True) -> Path:
 
 def build_prompt(asset: dict, folio: dict, kind: str) -> str:
     parts = [HOUSE_STYLE, KIND_CLAUSE[kind]]
+    if folio.get("presenter") and kind == "plate" and not asset.get("of"):
+        # a then-state inherits its base's composition, so only originals carry the clause
+        parts.append(HOOK_COMPOSITION if asset.get("hook") else WIPE_CORNER)
     world = (folio.get("world") or "").strip()
     if world and kind != "map" and asset.get("world", True):
         parts.append(f"Period and material culture: {world}")
@@ -281,6 +299,14 @@ def find_phrase(words, flat, phrase, t_lo=-1e9, t_hi=1e9):
             if t_lo - 0.06 <= s <= t_hi:
                 hits.append((wi, flat[k + n - 1][1]))
     return hits
+
+
+def hook_scenes(vd: Path, folio: dict) -> set:
+    """Scenes on screen while the presenter's hook (full figure, right) is: they start before it ends."""
+    if not presenter.enabled(vd):
+        return set()
+    he = presenter.hook_end(vd)
+    return {s_["index"] for s_ in folio.get("scenes", []) if "f0" in s_ and s_["f0"] / FPS < he - 0.3}
 
 
 def end_time(folio: dict, tl: dict) -> float:
@@ -993,6 +1019,24 @@ def cmd_audit(a) -> int:
     for o in f.get("off_screen", []):
         if not o.get("what"):
             errs.append("off_screen entry without 'what'")
+    if presenter.enabled(vd):
+        if not f.get("presenter"):
+            errs.append('this lecture has an on-screen presenter but folio.json lacks "presenter": true '
+                        '(plates would not keep its corner calm, nor the hook plates their right side)')
+        byid = {x["id"]: x for x in assets}
+        for i in sorted(hook_scenes(vd, f)):
+            s_ = next(x for x in scenes if x["index"] == i)
+            p = scene_tsx(vd, i)
+            ids_ = used_assets(p.read_text(encoding="utf-8"), f) if p.exists() else set(brief_asset_ids(s_, byid))
+            for aid in sorted(ids_):
+                base = byid.get(aid)
+                while base and base.get("of") and base["of"] in byid:
+                    base = byid[base["of"]]
+                if base and asset_kind(f, base) == "plate" and not base.get("hook"):
+                    errs.append(f"scene {i} shows during the hook (presenter full-figure on the right) but plate "
+                                f"'{base['id']}' has no \"hook\": true — it would put its subject behind the presenter")
+    elif f.get("presenter"):
+        warns.append('folio.json has "presenter": true but the lecture has no presenter (presenter.py enable)')
     nights = [s_["index"] for s_ in scenes if s_.get("tone") == "night"]
     for i, j in zip(nights, nights[1:]):
         if j == i + 1:
@@ -1054,6 +1098,8 @@ def cmd_prompt(a) -> int:
                  + (f", `{rel}/argument.json`" if (vd / "argument.json").exists() else "") + "\n"
                  + (f"- Series precedent (carry world/cast/chrome/shared portraits forward): `{prev[-1].relative_to(REPO)}`\n" if prev else "- First folio episode of this series: establish `world`, `cast`, `chrome.running`.\n")
                  + f"- Write `{rel}/folio.json`, then `folio.py place` and `folio.py audit`.\n")
+        if presenter.enabled(vd):
+            text += presenter.folio_layout_section(vd)
     else:
         f = load_folio(vd)
         tl = load_timeline(vd)
@@ -1075,7 +1121,7 @@ def cmd_prompt(a) -> int:
                                + (f" (terms: {', '.join(o['terms'])})" if o.get("terms") else "") + "\n"
                                for o in off))
         if presenter.enabled(vd):
-            text += presenter.folio_layout_section(vd)
+            text += presenter.folio_layout_section(vd, sorted(hook_scenes(vd, f)))
         for i in sorted(want & set(sc)):
             s_ = sc[i]
             nxt = sc.get(i + 1)
@@ -1157,9 +1203,8 @@ def build_data(vd: Path, folio: dict, tl: dict) -> dict:
         "assets": assets,
         "scenes": scenes,
     }
-    if presenter.enabled(vd):  # captions step aside from the presenter's zones
-        b0 = tl["narration_beats"][0]
-        data["presenter"] = {"hook_end": round(b0["t_end"], 3), "wipe": presenter.wipe_on(vd)}
+    if presenter.enabled(vd):  # chrome and captions step aside from the presenter
+        data["presenter"] = presenter.folio_stage_data(vd)
     return data
 
 
@@ -1466,8 +1511,11 @@ def cmd_still(a) -> int:
         i, fr, png, t_abs = j
         r = subprocess.run(["npx", "remotion", "still", str(b), f"S{i}", str(png), f"--frame={fr}", "--log", "error"],
                            cwd=REMOTION, capture_output=True, text=True)
-        if r.returncode == 0 and pres:  # outline the presenter's reserved zone at this moment
-            presenter.draw_zone(png, presenter.zone_at(vd, t_abs))
+        if r.returncode == 0 and pres:
+            if a.bare:   # only the reserved zone's outline
+                presenter.draw_zone(png, presenter.zone_at(vd, t_abs), folio=True)
+            else:        # the presenter's keyed picture where the compile will put it, + the zone
+                presenter.composite_preview(vd, png, t_abs)
         return png, (None if r.returncode == 0 else (r.stderr + r.stdout)[-1500:])
 
     fails = 0
@@ -1746,6 +1794,7 @@ def main() -> int:
     s.add_argument("--scene", required=True, help="scene index or comma list")
     s.add_argument("--at", help="comma list of scene-local seconds")
     s.add_argument("--auto", action="store_true", help="one still ~1 s after every cue + the final frame")
+    s.add_argument("--bare", action="store_true", help="presenter videos: leave the presenter preview off (zone outline only)")
     s = sub.add_parser("render")
     s.add_argument("video")
     s.add_argument("--only")

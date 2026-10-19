@@ -98,8 +98,18 @@ export type FolioData = {
   captions: CaptionGroup[];
   assets: Record<string, string>;
   scenes: Record<string, SceneSpan>;
-  /** Optional on-screen presenter (scripts/presenter.py): captions step aside from its zones. */
-  presenter?: {hook_end: number; wipe: boolean};
+  /** Optional on-screen presenter (scripts/presenter.py): chrome and captions step aside. */
+  presenter?: PresenterInfo;
+};
+/**
+ * Where the on-screen presenter stands (scripts/presenter.py folio_stage_data — the one source of
+ * these numbers). Hook = video time 0 → hook_end: full figure on the right, content at x < hook_x0,
+ * captions within caption_hook. After it, `wipe` = the paper window [x, y, w, h] in the top-right
+ * corner (null = hook only) and `zone` = its reserved rectangle [x0, y0, x1, y1].
+ */
+export type PresenterInfo = {
+  hook_end: number; wipe: [number, number, number, number] | null; zone: [number, number, number, number] | null;
+  hook_x0: number; caption_hook: [number, number];
 };
 
 type Ctx = {data: FolioData; scene: SceneSpan; next?: SceneSpan; t0: number; dur: number; tokens: string[]};
@@ -172,6 +182,10 @@ export const useCue = () => {
     return f;
   }, [data, scene.index, t0, dur, tokens]);
 };
+
+/** Where the presenter is (undefined in a video without one) — for a scene that must compose
+ *  around it: `const p = usePresenter(); const inHook = p && useGlobalT() < p.hook_end;` */
+export const usePresenter = (): PresenterInfo | undefined => useFolio().data.presenter;
 
 /** number → itself; string → cue start; undefined → fallback. */
 export const useAt = (at: At | undefined, fallback = 0): number => {
@@ -255,7 +269,7 @@ const romanTC = (sec: number) => {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
 
-const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: number; night: boolean}> = ({running, subtitle, plate, T, night}) => {
+const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: number; night: boolean; presenter?: PresenterInfo}> = ({running, subtitle, plate, T, night, presenter}) => {
   const c = night ? 'rgba(237,230,214,0.55)' : 'rgba(70,62,52,0.72)';
   const line = night ? 'rgba(237,230,214,0.28)' : 'rgba(60,52,44,0.45)';
   const halo = night ? '0 0 6px rgba(20,19,22,0.9)' : '0 0 6px rgba(232,225,211,0.95), 0 0 2px rgba(232,225,211,0.95)';
@@ -267,14 +281,19 @@ const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: num
     textTransform: 'uppercase', color: c, textShadow: halo, whiteSpace: 'nowrap',
     background: chip, boxShadow: `0 0 10px 6px ${chip}`, padding: '1px 2px 1px 6px', borderRadius: 3,
   };
+  // With a presenter: during the hook the figure stands over the right side (the plate numeral and
+  // timecode would sit under it); after it the window holds the top-right corner, so the numeral
+  // moves to the left of the window.
+  const inHook = !!presenter && T < presenter.hook_end;
+  const plateRight = presenter?.zone ? W - presenter.zone[0] + 14 : 76;   // ends left of the reserved zone
   return (
     <AbsoluteFill style={{pointerEvents: 'none'}}>
       <div style={{position: 'absolute', left: 34, top: 34, right: 34, bottom: 34, border: `1.5px solid ${line}`}} />
       <div style={{position: 'absolute', left: 42, top: 42, right: 42, bottom: 42, border: `1px solid ${line}`}} />
       <div style={{...txt, left: 80, top: 58}}>{running}</div>
-      <div style={{...txt, right: 76, top: 58}}>{plate ? `Pl. ${plate}` : ''}</div>
+      {!inHook && <div style={{...txt, right: plateRight, top: 58}}>{plate ? `Pl. ${plate}` : ''}</div>}
       <div style={{...txt, left: 80, bottom: 52}}>{subtitle}</div>
-      <div style={{...txt, right: 76, bottom: 52, letterSpacing: '0.2em'}}>{romanTC(T)}</div>
+      {!inHook && <div style={{...txt, right: 76, bottom: 52, letterSpacing: '0.2em'}}>{romanTC(T)}</div>}
     </AbsoluteFill>
   );
 };
@@ -282,7 +301,7 @@ const Chrome: React.FC<{running: string; subtitle: string; plate: string; T: num
 const CAPTION_LEAD = 0.2; // show a caption slightly before its first word
 const CAPTION_HOLD = 1.4; // keep it after its last word unless the next arrives
 
-const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; presenter?: FolioData['presenter']}> = ({groups, T, night, presenter}) => {
+const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; presenter?: PresenterInfo}> = ({groups, T, night, presenter}) => {
   let gi = -1;
   for (let i = 0; i < groups.length; i++) {
     if (groups[i].t0 - CAPTION_LEAD <= T) gi = i; else break;
@@ -300,12 +319,13 @@ const Captions: React.FC<{groups: CaptionGroup[]; T: number; night: boolean; pre
   const spoken = night ? PAL.cream : PAL.ink;
   const upcoming = night ? 'rgba(237,230,214,0.42)' : 'rgba(28,26,24,0.40)';
   const current = night ? '#C8373C' : PAL.crimson;
-  // presenter zones: the hook figure covers x ≥ 1180, the corner window x ≥ 1504 (bottom right)
-  const inset = !presenter ? 0 : T < presenter.hook_end ? 760 : presenter.wipe ? 430 : 0;
+  // presenter: during the hook the caption box keeps left of the figure (caption_hook); the
+  // window after it sits top-right, clear of the caption band.
+  const hookBox = presenter && g.t0 < presenter.hook_end ? presenter.caption_hook : null;
   return (
-    <div style={{position: 'absolute', left: 0, right: inset, bottom: 1080 - 1000, display: 'flex', justifyContent: 'center', opacity: op}}>
+    <div style={{position: 'absolute', left: hookBox ? hookBox[0] : 0, right: hookBox ? W - hookBox[1] : 0, bottom: 1080 - 1000, display: 'flex', justifyContent: 'center', opacity: op}}>
       <div style={{
-        maxWidth: Math.min(1460, 1920 - inset - 160), padding: '12px 30px 14px', background: night ? 'rgba(22,21,25,0.84)' : 'rgba(242,237,227,0.9)',
+        maxWidth: hookBox ? hookBox[1] - hookBox[0] : 1460, padding: '12px 30px 14px', background: night ? 'rgba(22,21,25,0.84)' : 'rgba(242,237,227,0.9)',
         fontFamily: FONT.text, fontSize: 33, lineHeight: 1.36, textAlign: 'center', letterSpacing: '-0.005em',
         boxShadow: night ? 'none' : '0 1px 0 rgba(60,52,44,0.08)',
       }}>
@@ -344,7 +364,7 @@ export const FolioStage: React.FC<{data: FolioData; scene: number; children: Rea
       <AbsoluteFill style={{backgroundColor: night ? PAL.night : PAL.paper, fontVariationSettings: `'opsz' ${OPSZ}`}}>
         <Img src={staticFile(night ? 'folio/paper_night.jpg' : 'folio/paper.jpg')} style={{position: 'absolute', width: W, height: H}} />
         <AbsoluteFill style={{opacity: fin * (1 - fout)}}>{children}</AbsoluteFill>
-        <Chrome running={data.chrome.running} subtitle={data.chrome.subtitle} plate={sc.plate} T={T} night={night} />
+        <Chrome running={data.chrome.running} subtitle={data.chrome.subtitle} plate={sc.plate} T={T} night={night} presenter={data.presenter} />
         <Captions groups={data.captions} T={T} night={night} presenter={data.presenter} />
       </AbsoluteFill>
     </FolioCtx.Provider>

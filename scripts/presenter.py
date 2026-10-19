@@ -8,11 +8,15 @@ on Modal GPUs and keyed over the finished video in any mode — Manim (math/tech
   1.5 at 720p on an H200 (scripts/longcat_avatar_modal.py). The frame's visuals keep the left ~60 %
   of the screen; the right side is reserved. FACE-ONLY: a full-figure gesture tends to leave a
   translucent ghost of the resting hand.
-- **Wipe** (every later frame): the presenter, head and shoulders, in a small rounded window in the
-  bottom-right corner — SoulX-FlashTalk-14B at 480x480 on an H100 (scripts/flashtalk_modal.py), ONE
-  clip per frame (the presenter resets where the frame changes), all of a video's clips in ONE
+- **Wipe** (every later frame): the presenter, head and shoulders, in a small window — SoulX-FlashTalk-14B
+  at 480x480 on an H100 (scripts/flashtalk_modal.py), ONE clip per frame, all of a video's clips in ONE
   container. Lip-sync, expressions and nods; no hands. Every frame keeps that corner clear.
-  `enable --no-wipe` = hook only.
+  Manim: a rounded navy window in the BOTTOM-RIGHT corner (the presenter resets at each frame change).
+  Folio: a square of the folio paper with the chrome's double hairline in the TOP-RIGHT corner (a plate
+  tipped into the page — the top of a folio screen is quiet; captions, legends and the camera's low
+  framing live in the lower half), each frame dissolving 0.3 s from the last picture of the one
+  before (no blink between paragraphs). Hook plates in a folio video carry `"hook": true` so the
+  scene continues behind the figure (folio.py). `enable --no-wipe` = hook only.
 
 The presenter is DIRECTED, not decorative: a subagent gives chosen sentences a facial expression (or a
 `nod`) whose teaching job is spelled out in FACES below (mark the key point, pose a question, warn,
@@ -38,15 +42,17 @@ US$5; hook only ≈ US$2.40; with a LongCat wipe ≈ US$16.
     python scripts/presenter.py generate VIDEO [...]      # clips (missing/stale only): hooks, then wipes
     python scripts/presenter.py hands VIDEO [...]         # LongCat gestures only: floating-hand check
     python scripts/presenter.py reset VIDEO N [...]       # reset frame N after its gesture (then generate)
-    python scripts/presenter.py zones STILL --hook|--wipe # outline the reserved zone on a 1920-wide still
+    python scripts/presenter.py zones STILL --hook|--wipe [--folio]  # outline the reserved zone on a still
     (compile_video.py / folio.py compile overlay the presenter automatically once its clips exist)
 """
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -168,7 +174,10 @@ def gestures_in_wipe(video: Path) -> bool:
 
 
 def is_folio(video: Path) -> bool:
-    return (Path(video) / 'folio.json').exists()
+    """A folio (documentary) video rather than a Manim one: it has a word timeline or a folio.json
+    (the presenter can be directed and generated before the director has written folio.json)."""
+    v = Path(video)
+    return (v / 'narration_timeline.json').exists() or (v / 'folio.json').exists()
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +302,15 @@ def cmd_enable(a):
 # frame height and placed from x ≈ 1210 px; a pointing hand reaches ~1180 px.
 WIPE_ZONE_PX = (1504, 664, 1920, 1080)      # x0, y0, x1, y1
 HOOK_ZONE_PX = (1180, 0, 1920, 1080)
+HOOK_X0 = HOOK_ZONE_PX[0]
+
+# Folio: the window is a paper square in the TOP-RIGHT corner, inside the chrome's hairline frame.
+FOLIO_WIPE_BOX = (1530, 56, 334, 334)       # x, y, w, h of the window (paper panel + presenter)
+FOLIO_WIPE_ZONE_PX = (1496, 0, 1920, 424)   # reserved: the window + breathing room
+FOLIO_CAPTION_HOOK = (90, 1150)             # hook: the caption box keeps within these x (the figure is right)
+FOLIO_XFADE = 0.3                           # folio wipe: frame k's last picture dissolves into frame k+1
+FOLIO_PANEL_REV = 'folio-paper-v1'          # part of the window digest
+PAPER_JPG = REPO / 'remotion' / 'public' / 'folio' / 'paper.jpg'
 
 
 def frame_numbers(video: Path) -> list:
@@ -327,27 +345,32 @@ reserved zone as a red box on its stills — nothing may sit in it.
 """
 
 
-def folio_layout_section(video: Path) -> str:
-    """Appended to the folio scene-author prompt when the lecture has a presenter."""
+def hook_end(video: Path) -> float:
+    """Video time at which the hook (the first frame) ends."""
     spans = frame_spans(video)
-    hook_end = spans[0][1] + spans[0][2]
-    out = f"""
+    return spans[0][1] + spans[0][2]
 
-### Presenter zones — this video has an on-screen presenter
 
-- **Hook (video time 0 – {hook_end:.1f} s):** the presenter stands large on the RIGHT, x ≥ 1180,
-  keyed over the scene afterwards. During it keep every element AND the plate's subject inside
-  x < 1160 (a camera `on` point on the left half, or a Plate box that ends at x 1160); the right
-  side is covered. Captions move left automatically.
-"""
-    if wipe_on(video):
-        out += """- **After the hook:** a presenter window covers the bottom-right corner, x > 1500 and y > 660.
-  Nothing that matters may sit there — no label, caption-like text, map key or the subject of a
-  plate (a full-bleed plate is fine as long as its subject is elsewhere). Captions move left automatically.
-"""
-    out += ('- `folio.py still` draws the reserved zone as a red box on every still — nothing that matters '
-            'may sit in it.\n')
-    return out
+def folio_layout_section(video: Path, hook_scenes=None) -> str:
+    """Appended to the folio director and scene-author prompts when the lecture has a presenter:
+    templates/folio_presenter_addendum.md + this video's hook timing (and its hook scenes)."""
+    text = (REPO / 'templates' / 'folio_presenter_addendum.md').read_text(encoding='utf-8')
+    if not wipe_on(video):
+        text += ('\n- **This lecture is hook-only** (`enable --no-wipe`): there is no window after the hook, '
+                 'so the top-right corner is free after it.\n')
+    text += f"\n- This video's hook runs 0–{hook_end(video):.1f} s"
+    text += (f"; hook scenes: {', '.join(map(str, hook_scenes))}.\n" if hook_scenes
+             else ': scenes starting before it are hook scenes.\n')
+    return text
+
+
+def folio_stage_data(video: Path) -> dict:
+    """The block folio.py puts in data.presenter for the Remotion stage (PresenterInfo in folio.tsx)."""
+    x, y, w, h = FOLIO_WIPE_BOX
+    wipe = wipe_on(video)
+    return {'hook_end': round(hook_end(video), 3), 'wipe': [x, y, w, h] if wipe else None,
+            'zone': list(FOLIO_WIPE_ZONE_PX) if wipe else None, 'hook_x0': HOOK_X0,
+            'caption_hook': list(FOLIO_CAPTION_HOOK)}
 
 
 def folio_scene_zone(video: Path, scene: dict, fps: int) -> str:
@@ -356,9 +379,10 @@ def folio_scene_zone(video: Path, scene: dict, fps: int) -> str:
     hook_end = spans[0][1] + spans[0][2]
     t0, t1 = scene['f0'] / fps, scene['f1'] / fps
     if t0 < hook_end - 0.6:          # (the hook figure fades out over its last 0.5 s)
-        return (f"- Presenter: HOOK zone (x ≥ 1180 covered) until {min(t1, hook_end) - t0:.1f} s into this scene"
-                + (', then the corner window.\n' if t1 > hook_end and wipe_on(video) else '.\n'))
-    return '- Presenter: corner window (x > 1500, y > 660 covered).\n' if wipe_on(video) else ''
+        return (f"- Presenter: HOOK scene — the figure covers x ≥ 1180 until {min(t1, hook_end) - t0:.1f} s into "
+                "this scene; its plates carry \"hook\": true"
+                + (', then the top-right window.\n' if t1 > hook_end and wipe_on(video) else '.\n'))
+    return '- Presenter: top-right window (x ≥ 1496, y ≤ 424 covered).\n' if wipe_on(video) else ''
 
 
 def zone_at(video: Path, t: float):
@@ -369,20 +393,89 @@ def zone_at(video: Path, t: float):
     return 'wipe' if wipe_on(video) else None
 
 
-def draw_zone(png: Path, which: str):
+def zone_px(which: str, folio: bool = False):
+    if which == 'hook':
+        return HOOK_ZONE_PX
+    return FOLIO_WIPE_ZONE_PX if folio else WIPE_ZONE_PX
+
+
+def draw_zone(png: Path, which: str, folio: bool = False):
     """Outline the reserved zone in red on a still (any width; zones are in 1920 px)."""
     from PIL import Image, ImageDraw
     if not which:
         return
     im = Image.open(png).convert('RGB')
     s = im.width / 1920
-    x0, y0, x1, y1 = HOOK_ZONE_PX if which == 'hook' else WIPE_ZONE_PX
+    x0, y0, x1, y1 = zone_px(which, folio)
     ImageDraw.Draw(im).rectangle([x0 * s, y0 * s, x1 * s - 1, y1 * s - 1], outline=(255, 40, 40), width=4)
     im.save(png)
 
 
+def _keyed(path: Path):
+    """A presenter picture on chroma green -> RGBA cutout (the same key as setup)."""
+    from PIL import Image
+    return _cutout(Image.open(path).convert('RGB'), True)
+
+
+def wipe_panel(video: Path, size: int = None):
+    """The folio window: a square of the folio paper (the stage's own texture) with the chrome's double
+    hairline, like a small plate tipped into the page. Cached in the presenter's folder."""
+    from PIL import Image, ImageDraw
+    n = FOLIO_WIPE_BOX[2]
+    cached = config(video)['dir'] / f'window_{FOLIO_PANEL_REV}.png'
+    if not cached.exists():
+        paper = Image.open(PAPER_JPG).convert('RGB')
+        px, py = int(paper.width * 0.78), int(paper.height * 0.12)      # an even patch near the top right
+        px, py = min(px, paper.width - n), min(py, paper.height - n)
+        tile = paper.crop((px, py, px + n, py + n)).convert('RGBA')
+        d = ImageDraw.Draw(tile)
+        d.rectangle([0, 0, n - 1, n - 1], outline=(60, 52, 44, 140), width=2)       # platemark
+        d.rectangle([6, 6, n - 7, n - 7], outline=(60, 52, 44, 110), width=1)       # inner hairline
+        tmp = cached.with_name(f'{cached.stem}.{os.getpid()}.{threading.get_ident()}.png')
+        tile.save(tmp)
+        os.replace(tmp, cached)          # atomic: parallel stills may read it while another writes it
+    p = Image.open(cached).convert('RGBA')
+    size = size or n
+    return p if p.width == size else p.resize((size, size), Image.LANCZOS)
+
+
+def wipe_picture(video: Path) -> Path:
+    return config(video)['dir'] / ('wipe.png' if wipe_model(video) == 'longcat' else 'wipe_head.png')
+
+
+def composite_preview(video: Path, png: Path, t: float):
+    """Folio stills: put the presenter's actual keyed picture where the compile will put it at video
+    time t — the full figure on the right in the hook, the paper window top-right after it — plus a
+    thin red outline of the reserved zone, so authors and reviewers judge the frame as viewers see it."""
+    from PIL import Image, ImageDraw
+    which = zone_at(video, t)
+    if not which:
+        return
+    cfg = config(video)
+    im = Image.open(png).convert('RGBA')
+    s = im.width / 1920
+    if which == 'hook':
+        b = _keyed(cfg['dir'] / 'hook.png')
+        b = b.resize((round(b.width * im.height / b.height), im.height), Image.LANCZOS)
+        im.alpha_composite(b, (round(im.width - b.width + 40 * s), 0))     # as overlay(): x = W - w + 40
+    else:
+        x, y, w, _ = FOLIO_WIPE_BOX
+        panel = wipe_panel(video, round(w * s))
+        inner = round((w - 20) * s)
+        head = _keyed(wipe_picture(video))
+        side = min(head.size)
+        head = head.crop(((head.width - side) // 2, (head.height - side) // 2,
+                          (head.width + side) // 2, (head.height + side) // 2)).resize((inner, inner), Image.LANCZOS)
+        panel.alpha_composite(head, (round(10 * s), round(10 * s)))
+        im.alpha_composite(panel, (round(x * s), round(y * s)))
+    x0, y0, x1, y1 = zone_px(which, folio=True)
+    ImageDraw.Draw(im).rectangle([x0 * s, y0 * s, x1 * s - 1, y1 * s - 1], outline=(220, 40, 40, 255),
+                                 width=max(1, round(2 * s)))
+    im.convert('RGB').save(png)
+
+
 def cmd_zones(a):
-    draw_zone(Path(a.still), 'hook' if a.hook else 'wipe')
+    draw_zone(Path(a.still), 'hook' if a.hook else 'wipe', folio=a.folio)
     print(f'✓ {a.still}')
 
 
@@ -395,18 +488,28 @@ def _probe(p: Path) -> float:
                                  str(p)], capture_output=True, text=True).stdout)
 
 
+def _decoded(p: Path) -> float:
+    """Decoded audio length — what a stacked audio track really runs (container durations drift
+    ~30 ms a file, which over a long video becomes visible lip-sync drift)."""
+    pcm = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(p), '-f', 's16le', '-ac', '1', '-ar', '48000', '-'],
+                         capture_output=True).stdout
+    return len(pcm) / (2 * 48000)
+
+
 def frame_spans(video: Path) -> list:
     """[(frame number, start, duration)] on the compiled timeline. Folio: the narration timeline
-    (decoded durations, what folio.py compile stacks); Manim: compile_video.py's clock (container
-    durations of audio/frame_N.mp3, back to back)."""
+    (DECODED durations, what folio.py compile stacks; decoded here too when the timeline is not built
+    yet); Manim: compile_video.py's clock (container durations of audio/frame_N.mp3, back to back)."""
     video = Path(video)
     tl = video / 'narration_timeline.json'
-    if is_folio(video) and tl.exists():
+    folio = is_folio(video)
+    if folio and tl.exists():
         beats = json.loads(tl.read_text(encoding='utf-8'))['narration_beats']
         return [(b['frame'], b['t_start'], b['t_end'] - b['t_start']) for b in beats]
+    dur = _decoded if folio else _probe
     out, t = [], 0.0
     for n in frame_numbers(video):
-        d = _probe(video / 'audio' / f'frame_{n}.mp3')
+        d = dur(video / 'audio' / f'frame_{n}.mp3')
         out.append((n, t, d))
         t += d
     return out
@@ -496,22 +599,17 @@ def directions_prompt(video: Path) -> str:
     sd = load_script(video)
     rel = video.relative_to(REPO) if video.is_relative_to(REPO) else video
     wipe = wipe_on(video)
+    folio = is_folio(video)
     frames = '\n\n'.join(f'### Frame {f.number}' + (' — THE HOOK' if i == 0 else '')
                          + f'\n\n{f.narration}' for i, f in enumerate(sd.frames)
                          if i == 0 or wipe)
+    corner = 'top-right' if folio else 'bottom-right'
+    jobs = FOLIO_JOBS if folio else TEACHING_JOBS
     return f"""# Direct the on-screen presenter
 
 This video has an on-screen presenter who speaks the narration below, lip-synced: large beside the
-visuals in the first frame (the hook){', then head and shoulders from a small window in the bottom-right corner for every later frame' if wipe else ''}.
-**You direct the presenter's EXPRESSION**: pick the sentences where a reaction helps the viewer LEARN at
-that moment. The presenter is a teacher, not decoration — every direction does one of these jobs:
-
-- **mark what to remember** — the definition, theorem, result or thesis sentence: `confident` / `serious`
-- **pose a question** — the sentence that asks it: `curious` (the answer gets its own reaction)
-- **warn** — a common mistake or a forgotten condition: `serious`
-- **react** — a counter-intuitive fact: `surprised`; an elegant result or a finished proof: `delighted`;
-  reflecting on what was just shown: `thoughtful`; confirming ("yes, that's right"): `"gesture": "nod"`
-
+{'opening picture' if folio else 'visuals'} in the first frame (the hook){f', then head and shoulders from a small window in the {corner} corner for every later frame' if wipe else ''}.
+{jobs}
 {direction_menu(gestures=False)}
 
 Rules:
@@ -541,6 +639,34 @@ once, an unknown id, or a hand gesture. Fix and re-run until clean.
 """
 
 
+TEACHING_JOBS = """**You direct the presenter's EXPRESSION**: pick the sentences where a reaction helps the viewer LEARN at
+that moment. The presenter is a teacher, not decoration — every direction does one of these jobs:
+
+- **mark what to remember** — the definition, theorem, result or thesis sentence: `confident` / `serious`
+- **pose a question** — the sentence that asks it: `curious` (the answer gets its own reaction)
+- **warn** — a common mistake or a forgotten condition: `serious`
+- **react** — a counter-intuitive fact: `surprised`; an elegant result or a finished proof: `delighted`;
+  reflecting on what was just shown: `thoughtful`; confirming ("yes, that's right"): `"gesture": "nod"`
+"""
+
+# A documentary (folio) presenter is a storyteller reacting to her or his own story.
+FOLIO_JOBS = """**You direct the presenter's EXPRESSION** the way a storyteller reacts to their own story — never
+decoration. Every direction does one of these jobs:
+
+- **a question** the story poses ("Why did the assembly vote for it?") → `curious`
+- **a turn or a shock** (a betrayal, a reversal, an absurd fact) → `surprised`
+- **a death, a defeat, cruelty, a plague** → `serious`
+- **a verdict** — the episode's claim, the source's judgement on a person → `confident`
+- **a clever stroke** (a stratagem that works, a winning argument) → `delighted`
+- **reflection** on what it meant → `thoughtful`
+- **confirming** ("And so it proved.") → `"gesture": "nod"`
+- warm narration otherwise (`smile` is the resting face; no direction needed)
+
+The presenter narrates; they are not a character in the story. The directions are metadata only —
+the narration is not changed.
+"""
+
+
 def _directions_prompt_gestures(video: Path) -> str:
     """The LongCat-wipe version: hand gestures in the wipe, one per frame."""
     from scripts.utils.script_parser import load_script
@@ -554,7 +680,7 @@ def _directions_prompt_gestures(video: Path) -> str:
     return f"""# Direct the on-screen presenter
 
 This video has an on-screen presenter who speaks the narration below, lip-synced: large beside the
-visuals in the first frame (the hook){', then from a small window in the bottom-right corner for every later frame' if wipe else ''}.
+visuals in the first frame (the hook){f", then from a small window in the {'top-right' if is_folio(video) else 'bottom-right'} corner for every later frame" if wipe else ''}.
 **You direct the presenter**: pick the sentences where a gesture or an expression helps the viewer
 LEARN at that moment. The presenter is a teacher, not decoration — every direction does one of these jobs:
 
@@ -895,8 +1021,11 @@ def _window_assets(video: Path) -> tuple:
 def build_wipe_window(video: Path, plan: dict) -> Path:
     """The corner window as ONE transparent track (frames back to back): each frame's clip trimmed to
     its frame, keyed, faded out/in at the frame change (RESET_FADE), set on the window with rounded
-    corners and a border drawn over it; the whole window fades in at the start and out at the end."""
+    corners and a border drawn over it; the whole window fades in at the start and out at the end.
+    A folio video gets the paper window instead (build_folio_window)."""
     from PIL import Image, ImageDraw
+    if is_folio(video):
+        return build_folio_window(video, plan)
     pd = Path(video) / 'presenter'
     fill, mask, border = _window_assets(video)
     frame_png = pd / 'window_border.png'                # the border, drawn OVER the presenter
@@ -931,6 +1060,83 @@ def build_wipe_window(video: Path, plan: dict) -> Path:
     joined.unlink(missing_ok=True)
     for p in parts:
         p.unlink(missing_ok=True)
+    (pd / 'wipe_window.digest').write_text(window_digest(video, plan))
+    return out
+
+
+def window_digest(video: Path, plan: dict) -> str:
+    """What the built window depends on: the wipe plan, the clips it is made of, the window's look.
+    PATH-FREE on purpose: `generate` may be given the video folder as typed (relative) and `compile`
+    resolve it (absolute) — audio paths in the plan would then differ and a fresh window would look
+    stale (or a stale one fresh). Only file names and contents go in."""
+    video = Path(video)
+    pd = video / 'presenter'
+    wipe = {**plan['wipe'], 'frames': [{**f, 'audio': Path(f['audio']).name if f.get('audio') else None}
+                                       for f in plan['wipe']['frames']]}
+    clip_digests = [(pd / f"wipe_{f['frame']}_p{k}.digest").read_text()
+                    if (pd / f"wipe_{f['frame']}_p{k}.digest").exists() else None
+                    for f in plan['wipe']['frames'] for k in range(len(f['pieces']))]
+    if is_folio(video):
+        look = ['folio', list(FOLIO_WIPE_BOX), FOLIO_XFADE, FOLIO_PANEL_REV]
+    else:
+        cfg = config(video)
+        look = ['manim', WIPE_PX, RESET_FADE, cfg.get('panel'), cfg.get('border')]
+    return _digest(wipe, clip_digests, look, KEY_FILTER, FADE)
+
+
+def window_current(video: Path, plan: dict) -> bool:
+    pd = Path(video) / 'presenter'
+    dg = pd / 'wipe_window.digest'
+    return (pd / 'wipe_window.mov').exists() and dg.exists() and dg.read_text() == window_digest(video, plan)
+
+
+def build_folio_window(video: Path, plan: dict) -> Path:
+    """The folio top-right window as ONE transparent track: every frame's clip trimmed to its frame,
+    frame k's last picture dissolving into frame k+1 over FOLIO_XFADE (the presenter never blinks out
+    between paragraphs), keyed, on the folio paper panel; joined with the concat demuxer (-c copy);
+    the whole window fades in after the hook and out at the end. Built one frame at a time — at most
+    three small inputs per ffmpeg, never one graph over every clip (memory grows with every input)."""
+    video = Path(video)
+    pd = video / 'presenter'
+    x, y, w, h = FOLIO_WIPE_BOX
+    panel = pd / 'window_panel.png'
+    wipe_panel(video, w).save(panel)
+    inner = w - 20
+    parts, prev = [], None
+    for f in plan['wipe']['frames']:
+        src, out, d = pd / f"wipe_{f['frame']}_green.mp4", pd / f"wipe_{f['frame']}_window.mov", f['duration']
+        args = ['ffmpeg', '-v', 'error', '-y', '-i', str(src), '-loop', '1', '-t', f'{d:.3f}', '-i', str(panel)]
+        g = (f"[0:v]fps=30,tpad=stop_mode=clone:stop_duration=5,trim=0:{d:.3f},setpts=PTS-STARTPTS,"
+             f"crop='min(iw,ih)':'min(iw,ih)',scale={inner}:{inner}:flags=lanczos")
+        if prev is not None:                       # dissolve from the previous frame's last picture
+            args += ['-loop', '1', '-t', f'{FOLIO_XFADE:.3f}', '-i', str(prev)]
+            fc = (f"{g}[g];[2:v]fps=30,scale={inner}:{inner},format=yuv420p,setsar=1[st];"
+                  f"[g]format=yuv420p,setsar=1[g2];"
+                  f"[st][g2]xfade=transition=fade:duration={FOLIO_XFADE}:offset=0[gx];[gx]{KEY_FILTER},format=rgba[ch];")
+        else:
+            fc = f"{g},{KEY_FILTER},format=rgba[ch];"
+        fc += "[1:v]fps=30,format=rgba[pn];[pn][ch]overlay=x=10:y=10:shortest=1[wv]"
+        subprocess.run(args + ['-filter_complex', fc, '-map', '[wv]', '-t', f'{d:.3f}', '-c:v', 'qtrle', str(out)],
+                       check=True)
+        prev = pd / f"wipe_{f['frame']}_last.png"
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-sseof', '-0.1', '-i', str(src), '-frames:v', '1',
+                        '-vf', f"crop='min(iw,ih)':'min(iw,ih)',scale={inner}:{inner}", str(prev)], check=True)
+        parts.append(out)
+    lst = pd / 'wipe_window.txt'
+    lst.write_text(''.join(f"file '{p.resolve()}'\n" for p in parts))
+    joined, out = pd / 'wipe_window_joined.mov', pd / 'wipe_window.mov'
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', str(lst), '-c', 'copy',
+                    str(joined)], check=True)
+    total = sum(f['duration'] for f in plan['wipe']['frames'])
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', str(joined), '-vf',
+                    f'format=rgba,fade=t=in:st=0:d={FADE}:alpha=1,fade=t=out:st={max(0, total - FADE):.3f}:d={FADE}:alpha=1',
+                    '-c:v', 'qtrle', str(out)], check=True)
+    joined.unlink(missing_ok=True)
+    for p in parts:
+        p.unlink(missing_ok=True)
+    for f in plan['wipe']['frames']:
+        (pd / f"wipe_{f['frame']}_last.png").unlink(missing_ok=True)
+    (pd / 'wipe_window.digest').write_text(window_digest(video, plan))
     return out
 
 
@@ -1082,7 +1288,8 @@ def cmd_reset(a):
 
 def overlay(video: Path, base: Path, out: Path):
     """Hook over the first frame (fades out with it), wipe from the second frame to the end of the
-    narration (fades in/out). Audio is copied untouched."""
+    narration (fades in/out) — bottom right in a Manim video, top right in a folio one. Audio is
+    copied untouched. Two or three inputs: the cut, the hook clip and the pre-built window track."""
     video = Path(video)
     pd = video / 'presenter'
     plan = build_plan(video)
@@ -1097,11 +1304,13 @@ def overlay(video: Path, base: Path, out: Path):
         last, idx = f'b{idx}', idx + 1
     if plan['wipe']['frames']:
         window = pd / 'wipe_window.mov'
-        if not window.exists():
+        if not window_current(video, plan):      # missing, or built for other clips / another look
             build_wipe_window(video, plan)
         inputs += ['-i', str(window)]
         chains.append(f"[{idx}:v]setpts=PTS+{plan['wipe']['start']:.3f}/TB[wf]")
-        chains.append(f'[{last}][wf]overlay=x=W-w-{WIPE_MARGIN}:y=H-h-{WIPE_MARGIN}:eof_action=pass[b{idx}]')
+        at = (f'x={FOLIO_WIPE_BOX[0]}:y={FOLIO_WIPE_BOX[1]}' if is_folio(video)      # folio: top right
+              else f'x=W-w-{WIPE_MARGIN}:y=H-h-{WIPE_MARGIN}')                       # Manim: bottom right
+        chains.append(f'[{last}][wf]overlay={at}:eof_action=pass[b{idx}]')
         last = f'b{idx}'
     chains.append(f'[{last}]format=yuv420p[v]')
     subprocess.run(['ffmpeg', '-v', 'error', '-y', *inputs, '-filter_complex', ';'.join(chains),
@@ -1157,6 +1366,7 @@ def main():
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument('--hook', action='store_true')
     g.add_argument('--wipe', action='store_true')
+    p.add_argument('--folio', action='store_true', help='the folio window zone (top right)')
     p.set_defaults(fn=cmd_zones)
     a = ap.parse_args()
     a.fn(a)

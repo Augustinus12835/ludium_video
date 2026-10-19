@@ -96,7 +96,8 @@ voices you have consent to use. Check current prices at [modal.com/pricing](http
 ## On-screen presenter (optional)
 
 A **lip-synced presenter from one photo** (you, a consenting colleague, or a drawn character):
-large beside the visuals in the opening hook, then in a bottom-right window. A subagent *directs*
+large beside the visuals in the opening hook, then in a corner window (bottom right in Manim
+videos; top right in folio, on a square of the book's paper). A subagent *directs*
 it, giving sentences an expression with a teaching job, and frames keep its zones clear.
 Example: [Single Variable Calculus 1.1 in Japanese](https://www.youtube.com/watch?v=lp75FjCqTZ0),
 presented by the anime tutor ルミ.

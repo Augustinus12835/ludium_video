@@ -5,10 +5,16 @@ lip-synced person or character made from ONE photo, on Modal (`scripts/presenter
 
 - **hook** = the first frame: the presenter large on the RIGHT (x ≥ 1180 px), face-only —
   LongCat-Video-Avatar 1.5, 720p on an H200 (`scripts/longcat_avatar_modal.py`);
-- **wipe** = every later frame: head and shoulders in a 380 px rounded window bottom-right
-  (x ≥ 1504, y ≥ 664 px) — SoulX-FlashTalk-14B, 480×480 (`scripts/flashtalk_modal.py`), one clip per
-  frame (the presenter resets where each frame changes), all of a video's clips in ONE H100
-  container. Lip-sync, expressions and nods; no hands. `--presenter-hook-only` skips it.
+- **wipe** = every later frame: head and shoulders — SoulX-FlashTalk-14B, 480×480
+  (`scripts/flashtalk_modal.py`), one clip per frame, all of a video's clips in ONE H100 container.
+  Lip-sync, expressions and nods; no hands. `--presenter-hook-only` skips it. Where it sits:
+  - **Manim:** a 380 px rounded navy window bottom-right (x ≥ 1504, y ≥ 664 px); the presenter
+    fades out and in where each frame changes.
+  - **Folio:** a 334 px square of the folio paper with the chrome's double hairline in the TOP-RIGHT
+    corner (box 1530,56; reserved x ≥ 1496, y ≤ 424), like a small plate tipped into the page; each
+    frame dissolves 0.3 s from the previous frame's last picture, so the presenter never blinks out
+    between paragraphs. Folio's hook plates continue the scene behind the figure (`"hook": true`,
+    see phase-b-folio.md Stage 3b).
 
 (`presenter.py enable … --longcat-wipe` gives the older waist-up LongCat window with hand gestures —
 ~6× the cost, and the gestures proved unreliable; only on request. Its extra checks are at the end.)
@@ -38,7 +44,7 @@ out of shot (re-crop it by hand if the automatic square is off). Then write `"lo
 `inputs/presenter/<name>/presenter.json`, one sentence describing what you see ("A woman in her
 thirties with shoulder-length black hair, silver earrings and a navy blazer"). Every prompt opens
 with it, and `generate` refuses while it is empty. Optional keys: `"style"` (default "Consistent with the reference image."),
-`"panel"` / `"border"` (window colours; default navy/gold for Manim, paper/ink for folio).
+`"panel"` / `"border"` (Manim window colours; default navy/gold — a folio window is always the paper square).
 
 If no photo was given, ask for one. Present only people who have agreed.
 
@@ -72,8 +78,11 @@ After TTS (folio: after the word timeline):
    bottom third of a long clip's last ~20 s.
 4. **Compile** as usual. `compile_video.py` / `folio.py compile` refuse while a clip is missing or
    stale, then key hook + window over the cut (`final_video_board.mp4` = visuals only;
-   `--no-presenter` compiles just that for a quick look). Extract a still in the hook and one in a
-   later frame and Read them, checking that nothing the viewer needs is under the presenter.
+   `--no-presenter` compiles just that for a quick look). The window track
+   (`presenter/wipe_window.mov`) is rebuilt automatically when its digest — the wipe plan with path-free
+   audio names, the clips' digests, the window's look — no longer matches, so a re-generated clip never
+   compiles with a stale window. Extract a still in the hook and one in a later frame and Read them,
+   checking that nothing the viewer needs is under the presenter.
 
 ### LongCat wipe only (`--longcat-wipe`): hand checks before compiling
 

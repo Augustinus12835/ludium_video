@@ -183,9 +183,26 @@ raw) crops a stubborn paper margin.
 
 Any time after the word timeline: direct the presenter and start its clips
 (references/presenter.md "Per video"). They generate on Modal while assets and scenes are made.
-The scene prompt then carries the presenter zones: during the hook keep each element and the plate's
-subject at x < 1160; after it, keep the bottom-right corner (x > 1500, y > 660) clear.
-`folio.py still` outlines the live zone in red, and captions move left automatically.
+The directions prompt is a storyteller's in a folio video (a question → `curious`, a turn →
+`surprised`, a death or defeat → `serious`, a verdict → `confident`, a clever stroke →
+`delighted`, reflection → `thoughtful`, confirming → `nod`).
+
+Both the director and scene prompts carry `templates/folio_presenter_addendum.md`:
+- `folio.json` gets `"presenter": true` — every plate's prompt then keeps its upper-right corner calm;
+- **hook plates:** each plate shown during the hook (script frame 0, the full figure on the right,
+  x ≥ 1180) carries `"hook": true` — its prompt puts the subject in the left three-fifths and
+  continues the scene, quiet but fully drawn, across the right two-fifths, so the presenter stands
+  inside the picture, never on blank paper. `folio.py audit` errors on a hook scene's plate without
+  the flag (and on a presenter lecture without `"presenter": true`). Hook-scene camera stops keep
+  the subject left of x ≈ 1100, overlays at x < 1150;
+- **after the hook** the paper window holds the TOP-RIGHT corner (x ≥ 1496, y ≤ 424): nothing that
+  matters goes there.
+
+The stage steps aside by itself: during the hook it hides the plate numeral and timecode and
+narrows the captions to the left of the figure; after it the plate numeral sits left of the window.
+`folio.py still` composites the presenter's real keyed picture where the compile will put it (the
+figure in the hook, the paper window after it) plus a red outline of the zone; `--bare` shows only
+the outline. `folio.py compile` overlays the hook and the window over the board cut in one pass.
 
 ## Stage 4 — scene authors (parallel subagents)
 

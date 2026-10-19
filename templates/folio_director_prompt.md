@@ -142,7 +142,10 @@ world?: false (subject outside the series' period, e.g. a 15th-century library o
 excavation), shared?: true (series-wide portraits/objects
 reused across episodes), from?: "<repo-relative image path>" (reuse an image already on disk —
 a plate from another episode, a contact sheet, a render still — instead of generating one; no
-prompt needed; add `"finish": false` to keep a screenshot's own colours)}`.
+prompt needed; add `"finish": false` to keep a screenshot's own colours),
+hook?: true (presenter videos only: a plate shown during the hook — see "The on-screen presenter"
+below when this prompt has that section), redraw?: true (unlettered maps only: the optional
+no-writing redraw pass)}`.
 
 Prompt rules (the model sees the house style clause + `world` + cast looks + your prompt):
 - 25–70 words: subject, action, viewpoint/shot, setting, light. Name concrete period detail.

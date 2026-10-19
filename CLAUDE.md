@@ -175,9 +175,12 @@ window by SoulX-FlashTalk-14B (`scripts/flashtalk_modal.py`); `scripts/presenter
 generates and keys it. Example: https://www.youtube.com/watch?v=lp75FjCqTZ0 (Japanese).
 
 - **Hook** = the first frame, the presenter large on the right (x ≥ 1180 px; LongCat 720p, H200),
-  face-only; **wipe** = every later frame, a 380 px window bottom-right (x ≥ 1504, y ≥ 664 px),
-  head and shoulders — FlashTalk 480×480, ONE clip per frame, all of a video's clips in ONE H100
-  container: lip-sync, expressions, nods, no hands. `enable --no-wipe` = hook only;
+  face-only; **wipe** = every later frame, head and shoulders — FlashTalk 480×480, ONE clip per
+  frame, all of a video's clips in ONE H100 container: lip-sync, expressions, nods, no hands.
+  Manim: a 380 px navy window bottom-right (x ≥ 1504, y ≥ 664 px). Folio: a 334 px square of the
+  folio paper with the chrome's double hairline in the TOP-RIGHT corner (box 1530,56; reserved
+  x ≥ 1496, y ≤ 424 — the top of a folio screen is quiet, the captions and the action live low),
+  each frame dissolving 0.3 s from the previous frame's last picture. `enable --no-wipe` = hook only;
   `enable --longcat-wipe` = the older waist-up LongCat window with hand gestures (~6× the cost,
   gestures unreliable: sticky poses, ghost hands, drawn-in captions in long clips).
 - **Opt-in per lecture:** `presenter.py setup PHOTO` once (rembg cut-out →
@@ -186,19 +189,28 @@ generates and keys it. Example: https://www.youtube.com/watch?v=lp75FjCqTZ0 (Jap
   `pipeline/<L>/presenter.json` is what every hook checks; without it nothing changes.
 - **Zones are reserved where visuals are authored:** `render_step_prompt.py manim` appends a
   Presenter layout section (first frame: everything at x < 1.4; later frames: nothing in
-  x > 4.0 ∧ y < −0.9), `folio.py prompt scenes` appends the zones per scene, folio captions
-  step aside (`data.presenter` in `folio.tsx`), and `audit_frames.py` / `folio.py still`
-  outline the live zone in red on their stills.
+  x > 4.0 ∧ y < −0.9); `folio.py prompt direct|scenes` append `templates/folio_presenter_addendum.md`
+  + the hook scenes; `audit_frames.py` outlines the live zone in red on its stills.
+- **Folio specifics:** `folio.json` carries `"presenter": true` (every plate prompt gets a calm
+  upper-right corner) and each plate shown during the hook `"hook": true` (its prompt puts the
+  subject in the left three-fifths and continues the scene, quiet but fully drawn, across the right
+  two-fifths, so the presenter stands inside the picture); `folio.py audit` errors on either
+  missing. The stage (`data.presenter` in `folio.tsx`, `usePresenter()`) hides the right-hand
+  chrome during the hook, narrows the captions to the left of the figure, and moves the plate
+  numeral left of the window. `folio.py still` composites the presenter's actual keyed picture
+  where the compile will put it, plus the red zone (`--bare` = outline only).
 - **Directed, not decorative:** `presenter.py prompt` → a subagent writes
   `Video-N/presenter/directions.json` (`{frame, anchor, face?, gesture?}` on a verbatim phrase;
-  faces each with a teaching job, `nod` the only gesture with a FlashTalk wipe — it switches its
+  faces each with a teaching job — in a folio video a storyteller's: curious question, surprised
+  turn, serious death or defeat, confident verdict, delighted clever stroke — `nod` the only gesture with a FlashTalk wipe — it switches its
   prompt per 1.12 s chunk; the hook face-only). `presenter.py plan` gates it. (LongCat wipe: hand
   gestures, ONE per frame — it holds a pose once taken — and a split just before the gesture.)
 - **Clips are digest-cached** (audio + direction + picture + prompt): only changed frames
   regenerate. (LongCat wipe only: `presenter.py hands` flags a hand left floating after its
   gesture; `reset` adds one cross-faded clip from rest.)
 - **Compile** (`compile_video.py`, `folio.py compile`) refuses while a clip is missing or stale,
-  then keys hook + window over the cut; `final_video_board.mp4` keeps the visuals-only cut and
+  then keys hook + window over the cut (the window track is rebuilt when its path-free digest —
+  wipe plan, clip digests, look — no longer matches; one frame per ffmpeg, joined by concat); `final_video_board.mp4` keeps the visuals-only cut and
   `--no-presenter` compiles only that.
 - **Cost:** hook ≈ US$0.075/s (≈ US$2.40 for 30 s); FlashTalk wipe ≈ US$0.003/s + ~3 min start-up
   per video (≈ US$2.50 per 10 min) — ≈ US$5 per 10-minute video (a LongCat wipe ≈ US$16).
