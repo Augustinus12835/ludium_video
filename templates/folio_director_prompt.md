@@ -69,7 +69,10 @@ Use it wherever it serves the telling; it is a tool, not a quota:
 
 A camera plate can carry a longer scene (15–40 s) because every move is a change. Brief it as
 camera stops on quoted phrases ("whole view; on 'somewhere for the audience to sit' to the
-seated crowd at left; on 'stood the skene' to the hut"). Write its prompt FOR the camera: a
+seated crowd at left; on 'stood the skene' to the hut"). Brief a stop only where the
+narration SHIFTS FOCUS to a new subject, a few seconds apart — not a stop per phrase; the
+camera must rest between moves, and a move that only re-centres what is already in view is
+rejected by lint. Write its prompt FOR the camera: a
 wide, deep composition, every figure and feature the narration names clearly separated from
 the others with open space between them, set a little in from the picture's edges (the camera
 cannot centre what sits on the border), each one large and detailed enough to fill the frame

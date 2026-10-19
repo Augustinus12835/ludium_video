@@ -95,7 +95,8 @@ Every component takes `at` (cue or seconds) and most take `until` (exit).
   `dur` s (default 1.8; `0` = a hard cut) to centre image point `on` at `zoom` (1 = whole
   plate), then holds with a slow drift-in. The framed point sits a little above screen
   centre, clear of the captions; edges clamp (the plate always fills the frame, so a figure on
-  the border lands off-centre). Long moves between two close-ups pull back mid-way.
+  the border lands off-centre). Each move is ONE straight move — pan and zoom together, no
+  pull-back on the way. To go from one detail to another, move straight there (or cut).
   ```tsx
   <Plate src="early_theatre" camera={[
     {at: 0, zoom: 1},                                                  // whole view
@@ -107,9 +108,21 @@ Every component takes `at` (cue or seconds) and most take `until` (exit).
   Patterns: a **tour** (whole → each part as named), **dialogue** (speaker, `dur: 0` cut to
   the listener, back, then pull out to both), a **reveal** (open at zoom 2.5 on a detail,
   pull out on the phrase that widens the view), **reading a tableau** figure by figure.
-  Craft: zoom ≤ 2.5 (lint warns past what the plate's resolution holds); hold each stop
-  ≥ ~2 s; pans 1.4–3 s; a stop on every named thing is plenty — the camera does not wander
-  between cues. Plate children zoom with the camera, so type that must stay a fixed size goes
+  Craft: zoom ≤ 2.5 (lint warns past what the plate's resolution holds); pans 1.4–3 s.
+  **Every move must have a clear purpose, and the viewer must be able to tell what it is.** The camera moves only when the narration
+  SHIFTS FOCUS to a different subject (or widens/narrows the view on purpose), and it lands
+  framing that subject. Not every named thing needs a stop: if the current framing already
+  shows it, stay put and let the drift carry the shot. Lint (ERRORS):
+  - **no nudges** — a move changes zoom by ≥ 1.3× or travels ≥ 25% of the visible frame.
+    Re-centring something already near the middle, or 1.3 → 1.35, reads as the camera
+    fidgeting and resetting;
+  - **no back-to-back motion** — a move never starts before the last one lands, and the
+    camera rests ≥ 2 s after landing (aim ≥ 3–4 s; under 3 s warns). When the narration
+    switches subject faster than that, make it a hard cut (`dur: 0`) or don't move at all.
+  - **no detours** — don't pull out to a wider stop only to push back in a few seconds later
+    (out-then-in is two moves doing one move's work); go straight to the next subject.
+  Rarely more than 2–3 moves in a scene. A plate that only holds ~1.35× (a 1080 asset)
+  is not toured — give it a slow push, or frame with a 4K plate. Plate children zoom with the camera, so type that must stay a fixed size goes
   OUTSIDE the Plate (screen space), and a label over a picture is usually unnecessary once
   the camera is showing the thing. A camera move counts as the scene "changing". Check each
   stop in its still: the thing named must be framed, not cut by the edge or the caption band.

@@ -362,6 +362,7 @@ type ImgState = {src: string; at: At; dur?: number};
  * to the plate filling the box (1 = whole plate). The camera MOVES there starting at `at`
  * over `dur` seconds (default 1.8; 0 = a hard cut, for shot / reverse-shot), then holds
  * with a slow drift-in (`drift`, zoom gained per second, default 0.006).
+ * A move is ONE straight move (pan + zoom together); `arc: true` adds a mid-way pull-back.
  */
 export type CamStop = {at: At; on?: [number, number]; zoom?: number; dur?: number; drift?: number; arc?: boolean};
 
@@ -371,30 +372,33 @@ const useCamera = (stops: CamStop[] | undefined, t: number) => {
   if (!stops || !stops.length) return null;
   type S = {x: number; y: number; z: number};
   const res = stops.map((s) => ({a: typeof s.at === 'number' ? s.at : cue(s.at), s}));
-  const target = (s: CamStop, prev?: S): S => ({x: s.on ? s.on[0] : prev ? prev.x : 960, y: s.on ? s.on[1] : prev ? prev.y : 540,
+  const target = (s: CamStop, prev: S): S => ({x: s.on ? s.on[0] : prev.x, y: s.on ? s.on[1] : prev.y,
     z: s.zoom ?? (s.on ? 1.8 : 1)});
-  let cur = target(res[0].s);
-  let settled = res[0].a;          // time the camera arrived at `cur`
-  let drift = res[0].s.drift ?? 0.006;
-  const held = (st: S, from: number, until: number, d: number): S => ({...st, z: st.z * (1 + d * Math.max(0, until - from))});
-  for (let i = 1; i < res.length; i++) {
-    const {a, s} = res[i];
-    if (t < a) break;
-    const from = held(cur, settled, a, drift);
-    const to = target(s, cur);
+  // Camera after the first n stops, at time tt. A stop that starts before the previous
+  // move has landed takes over from wherever the camera actually is (no snap).
+  const at = (n: number, tt: number): S => {
+    if (n === 1) {
+      const s0 = res[0].s, z0 = s0.zoom ?? (s0.on ? 1.8 : 1);
+      const st = {x: s0.on ? s0.on[0] : 960, y: s0.on ? s0.on[1] : 540, z: z0};
+      return {...st, z: z0 * (1 + (s0.drift ?? 0.006) * Math.max(0, tt - res[0].a))};
+    }
+    const {a, s} = res[n - 1];
+    if (tt < a) return at(n - 1, tt);
+    const from = at(n - 1, a);
+    const to = target(s, from);
     const dur = s.dur ?? 1.8;
-    const p = prog(t, a, dur, E.move);
-    // Long moves between two close-ups pull back mid-way (a fly-over, not a slide).
+    const p = prog(tt, a, dur, E.move);
+    // One clean move by default: an automatic mid-pan pull-back between close-ups reads as
+    // "pull back, then zoom in" — two moves. `arc: true` opts in.
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
-    const dip = s.arc === false || dur <= 0 ? 0 : Math.min(0.35, (dist / 1920) * 0.6) * Math.min(1, (Math.min(from.z, to.z) - 1) / 0.5);
-    const z = Math.exp(mix(Math.log(from.z), Math.log(to.z), p)) / (1 + Math.max(0, dip) * Math.sin(Math.PI * p));
-    cur = {x: mix(from.x, to.x, p), y: mix(from.y, to.y, p), z};
+    const dip = s.arc !== true || dur <= 0 ? 0
+      : Math.min(0.35, (dist / 1920) * 0.6) * clamp01((Math.min(from.z, to.z) - 1.5) / 0.5);
+    const z = Math.exp(mix(Math.log(from.z), Math.log(to.z), p)) / (1 + dip * Math.sin(Math.PI * p));
+    const cur = {x: mix(from.x, to.x, p), y: mix(from.y, to.y, p), z};
     if (p < 1) return cur;
-    cur = to;
-    settled = a + Math.max(0, dur);
-    drift = s.drift ?? 0.006;
-  }
-  return held(cur, settled, Math.max(t, settled), drift);
+    return {...to, z: to.z * (1 + (s.drift ?? 0.006) * Math.max(0, tt - a - Math.max(0, dur)))};
+  };
+  return at(res.length, t);
 };
 
 const useSteps = (steps: WashStep[] | undefined, t: number, initial: number) => {

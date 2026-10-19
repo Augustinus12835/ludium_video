@@ -132,7 +132,13 @@ gpt-image-2.5 and every grounded map at Gemini Pro imageSize 4K, then kept at 38
 (then-states inherit their base's canvas). `<Plate camera={[…]}>` then tours the picture — a
 building part by part, shot / reverse-shot between two speakers, a reveal, a tableau read
 figure by figure — instead of labels and leader lines (scene prompt "the camera"). Detail
-holds to ~2.5× zoom; `folio.py lint` warns past what a plate's canvas holds. Coordinates
+holds to ~2.5× zoom; `folio.py lint` warns past what a plate's canvas holds.
+**Camera rhythm:** a move must change the shot (zoom ≥ 1.3× or pan ≥ 25% of the frame) on a
+real shift of narrative focus, and the camera rests after it lands — lint ERRORS on nudges, a
+move starting before the last one lands, and < 2 s rests (warns < 3 s). Faster subject
+switches are hard cuts (`dur: 0`) or no move. Every move is one straight move — the mid-pan
+pull-back is off (`arc: true` opts in), and a wide stop held < 4 s between two tighter ones is
+a detour (lint ERROR). Coordinates
 (overlays, camera stops, `grid`) stay in 1920×1080 image space. A folio.json without
 `canvas` keeps 1920×1080 plates; `"canvas"` on one asset overrides.
 

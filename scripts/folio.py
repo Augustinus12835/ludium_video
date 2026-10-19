@@ -43,6 +43,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -1235,6 +1236,9 @@ def lint_scene(vd, folio, tl, s) -> tuple:
         if zs and max(zs) > lim:
             warns.append(f"camera zoom {max(zs):g} on '{a['id']}' ({cv or '1080'} canvas) — soft above ~{lim:g}"
                          + ("; regenerate the plate at canvas 4k" if cv != "4k" else ""))
+        ce, cw = camera_rhythm(m.group(2), a["id"], lim, lambda ph, n=None: resolve_cue(words, flat, s, ph, n)[0])
+        errs += ce
+        warns += cw
     for m in re.finditer(r"\b(?:y|top)\s*[=:]\s*\{?\s*(\d{3,4})", tsx):
         if int(m.group(1)) > 872:
             warns.append(f"y={m.group(1)} is inside the caption band (872–1006)")
@@ -1244,6 +1248,75 @@ def lint_scene(vd, folio, tl, s) -> tuple:
             if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", shown, re.I):
                 errs.append(f"off-screen term on screen: \"{term}\" ({o.get('what', '')})")
     return errs, warns
+
+
+CAM_STOP_RE = re.compile(r"\{([^{}]*\bat\s*:[^{}]*)\}")
+# Camera rhythm: four 1.3× moves in 11 s, each pulled back mid-pan, read as a camera
+# nudging and resetting with no subject; tiny re-centrings of
+# something already near the middle have no visible purpose. A move must change the shot —
+# zoom by ≥ CAM_MIN_ZOOM_STEP or bring a new subject in (pan ≥ CAM_MIN_PAN of the frame) —
+# and then rest; a change of subject sooner than that is a cut (dur: 0) or no move at all.
+CAM_MIN_HOLD = 3.0       # s the camera rests after landing before it moves again (warn)
+CAM_HARD_HOLD = 2.0      # under this it is back-to-back motion (error)
+CAM_DETOUR_HOLD = 4.0    # a wider stop between two tighter ones must hold this long
+CAM_COMMIT_ZOOM = 1.5    # below this, an off-centre stop frames nothing — it only drifts
+CAM_MIN_ZOOM_STEP = 1.3  # zoom ratio a move must change by …
+CAM_MIN_PAN = 0.25       # … or the share of the visible frame it must travel
+
+
+def camera_rhythm(track: str, aid: str, lim: float, cue_t) -> list:
+    """(errors, warnings) for a <Plate camera> track. Errors: a move that interrupts the
+    last one, and a nudge too small to read as a new shot. Warnings: a move that crowds
+    the last one, and a pan that never frames a subject."""
+    stops = []
+    for m in CAM_STOP_RE.finditer(track):
+        body = m.group(1)
+        at = re.search(r"""\bat\s*:\s*(?:(['"])(.+?)\1|(-?[\d.]+))""", body)
+        if not at:
+            continue
+        t = float(at.group(3)) if at.group(3) else cue_t(at.group(2))
+        if t is None:
+            continue
+        on = re.search(r"\bon\s*:\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]", body)
+        z = re.search(r"\bzoom\s*:\s*([\d.]+)", body)
+        d = re.search(r"\bdur\s*:\s*([\d.]+)", body)
+        stops.append({"t": t, "on": (float(on.group(1)), float(on.group(2))) if on else None,
+                      "z": float(z.group(1)) if z else (1.8 if on else 1.0),
+                      "dur": float(d.group(1)) if d else 1.8, "label": at.group(2) or at.group(3)})
+    errs, out, prev, landed = [], [], None, None
+    for s in stops:
+        if s["on"] is None and prev:
+            s["on"] = prev["on"]
+        s["on"] = s["on"] or (960.0, 540.0)
+        if prev is not None:
+            gap = s["t"] - landed
+            what = f"camera on '{aid}' at \"{s['label']}\""
+            if gap < 0:
+                errs.append(f"{what} starts before the previous move lands ({-gap:.1f} s early) — "
+                           f"drop a stop, or cut (dur: 0)")
+            elif gap < CAM_MIN_HOLD and s["dur"] > 0:
+                (errs if gap < CAM_HARD_HOLD else out).append(f"{what} moves again {gap:.1f} s after landing — hold ≥ {CAM_MIN_HOLD:g} s, "
+                           f"cut (dur: 0), or drop a stop")
+            zr = max(s["z"], prev["z"]) / min(s["z"], prev["z"])
+            pan = math.hypot(s["on"][0] - prev["on"][0], s["on"][1] - prev["on"][1])
+            frac = pan / (1920 / max(s["z"], prev["z"]))      # share of the visible frame
+            if zr < CAM_MIN_ZOOM_STEP and frac < CAM_MIN_PAN:
+                errs.append(f"{what} is a nudge (zoom ×{zr:.2f}, pan {frac:.0%} of the frame; a move needs "
+                            f"×{CAM_MIN_ZOOM_STEP:g} or {CAM_MIN_PAN:.0%}) — no visible purpose; drop the stop "
+                            f"(the previous framing already shows it) or frame the subject for real")
+            elif s["dur"] > 0 and 1.0 < s["z"] < CAM_COMMIT_ZOOM and frac >= 0.2 and s["z"] >= prev["z"]:
+                out.append(f"{what} pans to zoom {s['z']:g} — too wide to frame a subject; "
+                           + (f"frame it at ≥ {CAM_COMMIT_ZOOM:g}" if lim >= CAM_COMMIT_ZOOM
+                              else f"'{aid}' holds only ~{lim:g}× — stay wide (push) or use a 4k plate"))
+        landed = s["t"] + (s["dur"] if prev is not None else 0)
+        prev = s
+    # Detour: out to a wider stop, then straight back in soon after — two moves doing the
+    # work of one. Go straight to the next subject.
+    for p_, w, n_ in zip(stops, stops[1:], stops[2:]):
+        if w["dur"] > 0 and w["z"] < p_["z"] / 1.15 and n_["z"] > w["z"] * 1.15 and n_["t"] - (w["t"] + w["dur"]) < CAM_DETOUR_HOLD:
+            errs.append(f"camera on '{aid}' pulls out at \"{w['label']}\" then pushes back in at \"{n_['label']}\" "
+                        f"— a detour; move straight to the next subject (one move), or hold the wide ≥ {CAM_DETOUR_HOLD:g} s")
+    return errs, out
 
 
 def visible_text(tsx: str) -> str:
