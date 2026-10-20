@@ -17,18 +17,20 @@ It DETECTS only — it never rewrites text. False positives are expected and fin
   hex           0xDEADBEEF                  -> spaced chars ("0 x D E A D B E E F")
   opaque        long letter+digit blobs     -> spaced chars (hashes / addresses / txids)
   differential  dx du dy …                  -> spaced ("d x", "d u")  [the "du"->"do" failure]
-  greek_compound "delta X" / "lambda t" / "two pi R"
-                                            -> hyphen-bound ("delta-X", "lambda-T", "two pi-R")
-                                               [spaced, TTS drops a beat of dead air between the tokens]
+  hyphen        "T-v" / "delta-X" / "A-one" / "x-hat" / "e-k"
+                                            -> spaced ("T v", "delta X", "A one", "x hat")
+                                               [a hyphen inside a math token is read aloud — "T-v"
+                                                came out "T minus v", "y-z" "y dash z" (Drama 3).
+                                                Math-scope: Manim scripts only]
   acronym       UTXO ECDSA SHA …            -> spaced letters ("U T X O")  [allowlist read-as-words]
                 also mixed-case ("VaR" -> "value at risk", "CVaR", "DoS") and suffixed
                 ("UTXOs" -> "U T X O s") initialisms, which the all-caps run misses
   code_token    snake_case / -> / == …      -> spoken prose ("my func", "returns", "is equal to")
   variable_a    "a one"/"a-two" (var a_1), or a bare variable a ("a times t", "a of t",
-                "a-t", "slope a.")          -> uppercase the variable ("A-one"; "A times t", "A of t", "A-t")
-  sentence_a    sentence-initial "A" / "A-hat" / "A-X"  -> lead with the noun ("Matrix A times …")  [read as "uh"; hyphen doesn't rescue it]
-  alias         sinh / mu-hat / CAPM / i.e. -> the alias library's spoken form ("sinch",
-                "mew-hat", "cap-M", "that is"); scripts/utils/tts_aliases.py is the table and
+                "a-t", "slope a.")          -> uppercase the variable ("A one"; "A times t", "A of t", "A t")
+  sentence_a    sentence-initial "A" / "A hat" / "A X equals"  -> lead with the noun ("Matrix A times …")  [read as "uh"]
+  alias         sinh / mu hat / CAPM / i.e. -> the alias library's spoken form ("sinch",
+                "mew hat", "cap-M", "that is"); scripts/utils/tts_aliases.py is the table and
                 the subtitles compact the alias back. Math-scope entries (hyperbolics, mu /
                 rho / chi, V) are checked only in Manim scripts (frames with a frame_class).
 
@@ -66,21 +68,26 @@ _OPAQUE = re.compile(r"\b(?=[0-9A-Za-z]*[A-Za-z])(?=[0-9A-Za-z]*\d)[0-9A-Za-z]{8
 # Unspaced Roman-letter differentials: dx du dy dv dw dt dr ds dz (the "du" -> "do" failure).
 _DIFFERENTIAL = re.compile(r"\bd[xyuvwtrsz]\b")
 
-# Greek-letter name followed by a LOOSE single-letter variable ("delta X", "lambda t",
-# "sigma i", "two pi R"). The prompts require the hyphen-bound compound ("delta-X"): written
-# spaced, ElevenLabs drops a beat of dead air between the two tokens instead of voicing one
-# quantity. Calibrated over a 15,150-frame production corpus: 584 hits in 75 videos after the
-# three exclusions below, every one a genuine compound. Excluded — the article ("theta, a plane";
-# uppercase "theta A" IS a compound), a trailing "d" — always a differential in the corpus
-# ("d theta d t", "cosine theta d theta", "lambda d x prime"; the differential rule keeps those
-# spaced, and a genuine "delta d" is rare enough that missing it is the cheaper error), and the
-# Python keyword ("lambda X, colon …", "lambda X returning …"). Already-bound forms
-# ("delta X-one") are skipped.
+# Hyphen-bound math notation: a single letter or Greek-letter name joined by hyphens to further
+# letters, Greek names, index words or accents ("T-v", "y-z", "delta-X", "A-one", "x-hat",
+# "T-star-v", "v-one-i", "m-sub-r"). The prompts used to REQUIRE this form (ElevenLabs v2 timed
+# "delta X" with dead air); Drama 3 reads the hyphen aloud — an STT pass heard "minus"/"dash" in
+# ~12% of production sentences with a dashed token ("e to the minus A-T" -> "minus A minus T") —
+# so the prompts now require the spaced form ("T v", "delta X", "A one"). Calibrated over a
+# ~1,600-script production corpus: every sampled hit was notation; ordinary compounds ("x-axis",
+# "second-order", "one-to-one", "p-value") never match because the right-hand parts are
+# restricted to letters, Greek names, index words and accents. Runs only on Manim scripts (math
+# scope), where spelled-out letters ("A-R-U-M" in a language lesson) do not occur. A Greek name +
+# letter left SPACED ("delta X") is now the correct form; the old greek_compound check that
+# demanded the hyphen is gone.
 _GREEK_NAMES = (r"alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu|xi|"
-                r"omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega")
-_GREEK_COMPOUND = re.compile(
-    r"\b(?!(?i:lambda)\s+[A-Za-z]\s*(?:,|:|colon\b|returning\b))"
-    r"(?i:" + _GREEK_NAMES + r")\s+(?!a\b)(?!d\b)[A-Za-z]\b(?![-'])")
+                r"omicron|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega|mew|kai")
+_HYPHEN_HEAD = r"(?:[A-Za-z]|" + _GREEK_NAMES + r")"
+_HYPHEN_PART = (r"(?:[A-Za-z]|" + _GREEK_NAMES + r"|zero|one|two|three|four|five|six|seven|"
+                r"eight|nine|ten|naught|hat|bar|tilde|star|prime|dagger|squared|cubed|inverse|"
+                r"transpose|perp|sub|dot|double)")
+_HYPHEN_NOTATION = re.compile(
+    r"(?<![\w-])(?i:" + _HYPHEN_HEAD + r")(?:-(?i:" + _HYPHEN_PART + r"))+(?![\w-])")
 
 # Initialisms: 2+ capitals in a row. Allowlist below holds the ones TTS reads fine as words.
 _ACRONYM = re.compile(r"\b[A-Z]{2,}\b")
@@ -117,7 +124,7 @@ _CODE_TOKEN = re.compile(r"\b\w*_\w+\b|->|=>|==|!=|>=|<=")
 # a_3` (matrix entries, DE/Fourier coefficients, sequence terms) that reaches narration as
 # "a one, a two, a three" is voiced by ElevenLabs as "uh one, uh two, uh three" — the article
 # "a" collides with the variable. Only lowercase "a" collides; uppercase "A" and every other
-# letter read as the letter name. Fix: uppercase the variable ("A-one" / "A one").
+# letter read as the letter name. Fix: uppercase the variable ("A one").
 #
 # Detecting this is hard because the article legitimately precedes numbers ("a 4 by 4 matrix",
 # "a 2-of-3 setup", "a one-dimensional space"). Two guards keep precision high:
@@ -148,8 +155,11 @@ _SENTENCE_A = re.compile(
     r"(?:^|[.!?:;]\s+|\n\s*)"
     r"(A(?: (?:is|has|equals|times|plus|minus|transpose|inverse|acts|maps|becomes|"
     r"sub|squared|cubed|cross|hat|over|to the)"
-    # hyphenated variable forms (A-hat, A-X, A-one; legacy A-sub-X) still read as "uh" at
-    # sentence start — the hyphen binds the token but doesn't rescue leading "A".
+    # a spaced product/subscript ("A B equals", "A S equals", "A V equals") — a capital letter
+    # then an operator word; an article + initialism ("A U S bank", "A C V E is a") never
+    # matches. Calibrated 2026-10-20: every corpus hit of this shape is a matrix product.
+    r"| [A-Z] (?:is|equals|times|plus|minus|transpose|inverse|squared)"
+    # legacy hyphenated forms (A-hat, A-X, A-one, A-sub-X) also read as "uh" at sentence start.
     r"|-(?:hat|sub|prime|bar|tilde|one|two|three|four|five|six|seven|eight|nine|ten|[A-Z]))"
     r"\b[^.!?\n]{0,30})"
 )
@@ -197,7 +207,7 @@ def _variable_a(text):
 # leading-coefficient / generic variable `a`, spoken next to an operator word, an
 # argument, or at a clause end, is voiced by ElevenLabs as the article "uh" — "a times t"
 # -> "uh times t", "a of t" -> "uh of t", "the slope is a" -> "... is uh". Fix: uppercase
-# it ("A times t", "A of t", "the slope is A", "A-t"). Only lowercase "a" collides (every
+# it ("A times t", "A of t", "the slope is A", "A t"). Only lowercase "a" collides (every
 # other letter reads as its name), so this targets "a" alone. High-precision shapes only —
 # the article "a" never precedes "times/squared/cubed/of/equals/over" as an operator, never
 # hyphen-binds to a lone variable letter, and never ends a clause. A handful of residual
@@ -249,7 +259,6 @@ _DETECTORS = [
     ("hex", _HEX.findall),
     ("opaque", _OPAQUE.findall),
     ("differential", _DIFFERENTIAL.findall),
-    ("greek_compound", _GREEK_COMPOUND.findall),
     ("acronym", _acronyms),
     ("code_token", _CODE_TOKEN.findall),
     ("variable_a", _variable_a),
@@ -262,15 +271,20 @@ def _aliases(text, math):
     return [f"{written} -> {spoken!r}" for written, spoken in find_unaliased(text, math)]
 
 
+def _hyphen_notation(text, math):
+    return _HYPHEN_NOTATION.findall(text) if math else []
+
+
 def find_tts_issues(text: str, math: bool = True):
     """Return a list of (category, token) for every TTS-unfriendly token in `text`.
     Empty list = clean. De-duplicated per (category, token). math=False (narration-only /
-    humanities scripts) skips the alias library's math-scope entries."""
+    humanities scripts) skips the alias library's math-scope entries and the hyphen check."""
     if not text:
         return []
     seen = set()
     out = []
-    finders = _DETECTORS + [("alias", lambda t: _aliases(t, math))]
+    finders = _DETECTORS + [("hyphen", lambda t: _hyphen_notation(t, math)),
+                            ("alias", lambda t: _aliases(t, math))]
     for category, finder in finders:
         for tok in finder(text):
             key = (category, tok)
@@ -342,12 +356,13 @@ def format_report(offenders, video_dir) -> str:
     lines.append("")
     lines.append("  Spoken narration must be fully TTS-ready — no raw numerals, Greek letters,")
     lines.append("  math symbols, hex/opaque strings, unspaced differentials (dx -> 'd x'),")
-    lines.append("  unhyphenated Greek-letter compounds ('delta X' -> 'delta-X', 'lambda t' -> 'lambda-T'),")
+    lines.append("  hyphen-bound notation ('T-v' -> 'T v', 'delta-X' -> 'delta X', 'A-one' -> 'A one';")
+    lines.append("  a voice reads the hyphen as 'minus'/'dash'),")
     lines.append("  bare initialisms, code tokens, lowercase variable 'a' (indexed 'a one' ->")
-    lines.append("  'A-one'; bare 'a times t'/'a of t'/'slope a' -> 'A times t'/'A of t'/'slope A'),")
+    lines.append("  'A one'; bare 'a times t'/'a of t'/'slope a' -> 'A times t'/'A of t'/'slope A'),")
     lines.append("  or a sentence starting with the name 'A' (read as the article")
     lines.append("  'uh' — lead with the noun: 'Matrix A times ...'), or a written form the alias library")
-    lines.append("  respells (sinh -> 'sinch', mu-hat -> 'mew-hat', CAPM -> 'cap-M'; scripts/utils/tts_aliases.py —")
+    lines.append("  respells (sinh -> 'sinch', mu hat -> 'mew hat', CAPM -> 'cap-M'; scripts/utils/tts_aliases.py —")
     lines.append("  subtitles convert the alias back). Convert each in the spoken source")
     lines.append("  (script.json narration for every frame; a LEGACY math frame's natural_narration if present);")
     lines.append("  on-screen text keeps its normal form. Genuine false positive? Resume with")

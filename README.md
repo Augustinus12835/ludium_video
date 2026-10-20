@@ -70,7 +70,10 @@ without it, local files fall back to Whisper (`pip install openai-whisper`).
 
 [Fish Audio Drama 3](https://huggingface.co/fishaudio/drama-3) clones a voice zero-shot from a few
 clips. `scripts/drama3_modal.py` runs it on a Modal H100 and force-aligns the words on the same GPU,
-so you get word timestamps as from a hosted provider. Modal's free **US$30/month** credit covers
+so you get word timestamps as from a hosted provider. Every clip is also *heard back* in the same
+container (Whisper large-v3 + the aligner): a clip cut off, gone silent, or misread — a hyphen read
+as "minus", a garbled stretch of notation — is re-voiced automatically, and any take still misheard
+after 3 retakes is listed in `audio/stt_flags.json` for you to listen to. Modal's free **US$30/month** credit covers
 **~500 ten-minute videos** when batched (`/run-pipeline` voices a whole lecture per session):
 
 | Cost (Oct 2026) | |

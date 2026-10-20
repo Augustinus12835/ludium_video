@@ -205,6 +205,7 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
     out = old.copy()
     new_words_all = words[:]  # we rebuild this in place
 
+    new_flags = []
     # Splice last sentence first so untouched sample offsets stay valid (lengths preserved).
     for i, s, e, new_sent in sorted(changed, key=lambda x: -x[1]):
         # region = silence-midpoint before .. silence-midpoint after (seams land in silence)
@@ -221,6 +222,7 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
 
         regen_bytes, regen_words = call_elevenlabs_api(_tagged_sentence(script_frames.get(frame), new_sent),
                                                        voice_id=voice_id)
+        new_flags += _tts._DRAMA3.get('last_flags', [])
         npcm = decode(data=regen_bytes)
         # trim the regen's own lead/trail silence using its word timestamps -> pure speech; the
         # cut after the last word waits for its sound to decay (a CTC aligner such as Drama 3's
@@ -277,6 +279,8 @@ def fix_frame(video_dir: Path, frame: int, script_frames: dict, math_data, dry=F
     shutil.copy(tsp, tsp.with_suffix(".json.prefix.bak"))
 
     encode(out, audio)
+    if _tts.PROVIDER == 'drama3':      # the new takes' hear-back flags replace the old sentences'
+        _tts.update_stt_flags(audio.parent, frame, new_flags, [ns for _, _, _, ns in changed])
     ts["text"] = new_text
     ts["words"] = new_words_all
     tsp.write_text(json.dumps(ts, indent=2, ensure_ascii=False))

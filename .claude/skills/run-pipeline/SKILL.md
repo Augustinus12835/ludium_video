@@ -94,6 +94,16 @@ provider's `*_VOICE_ID`) — pass no `--voice-id`/`--profile`.
   and re-run; voiced frames are skipped), voices every pending frame in one session, writes
   `audio/` as the per-video TTS would, and flags frames whose speaking rate looks wrong (listen
   to those). Then spawn the producers; their `--from tts` slice finds the audio done.
+- **Hear-back review — surface every flagged sentence to the user.** Each Drama 3 clip is heard
+  by Whisper large-v3 + the CTC aligner in the same container (`drama3_modal.hearback`); a misread
+  (a stray "minus"/"dash", "T mass v" for "T-v", words not heard) is re-voiced automatically, and a
+  take still misheard after 3 retakes is KEPT and written to `Video-N/audio/stt_flags.json`
+  (frame → sentence, what Whisper and the aligner heard); the batch ends with a "Hear-back"
+  summary. When any video has flags, list each sentence for the user with the frame's
+  `audio/frame_<F>.mp3` to listen to. Don't wait idle — producers proceed (a sentence fix is
+  zero-shift, so frames need no re-timing). On the user's word: fix the narration and run
+  `fix_tts_sentence.py --frame <F>` (or `--resay "<sentence>"` to re-voice it unchanged), then
+  recompile; keep → delete that frame's entry from `stt_flags.json`.
 - **Delivery tags (opt-in, `DRAMA3_TAGS=1`):** before the batch, one clean-context subagent per
   video tags the approved script — `render_step_prompt.py tag --video-dir pipeline/<L>/Video-N`,
   response → `Video-N/narration_tags.json`, then `venv/bin/python -m scripts.utils.drama3_tags

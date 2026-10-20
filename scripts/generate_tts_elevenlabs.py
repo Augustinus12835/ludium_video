@@ -28,6 +28,7 @@ finishes in that narrator, and fix_tts_sentence.py re-voices sentences in it.
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -131,7 +132,8 @@ def check_provider_config() -> None:
 
 # Drama 3 (open weights on Modal): one warm container per process; frames are voiced in batches
 # (drama3_prefetch) and served to the per-frame calls from a cache.
-_DRAMA3 = {'session': None, 'cache': {}, 'style': ''}
+_DRAMA3 = {'session': None, 'cache': {}, 'style': '',
+           'flags': {}, 'last_flags': []}   # hear-back flags of takes kept despite a misread (drama3_modal)
 # House style: OFF by default. A fixed line-level direction such as `[a calm, engaged lecturer
 # working through the algebra at the board]` can prefix every Drama 3 request; next to videos
 # voiced with inline tags only, it made the delivery a tad flat, so DRAMA3_STYLE in .env enables
@@ -172,6 +174,42 @@ def _styled(text, style):
     return f"{style} {text}" if style else text
 
 
+# A hyphen inside a token ("T-v", "y-z", "A-T", "second-order") goes to the voice as a space, on
+# every English provider (ElevenLabs, Cartesia, HeyGen, Drama 3; not an explicit --voice-id or a
+# language_code request). Drama 3 read it aloud as "minus" or "dash" (in production ~12% of
+# sentences with a dashed token: "T-v" as "T minus v", "e to the minus A-T" as "e to the minus A
+# minus T"), so narration is now written spaced (tts_rules.py) and this is the safety net for older
+# scripts and for tokens that keep a hyphen on purpose ("cap-M"). The narration keeps its hyphens
+# (subtitles, Manim cue anchors); the providers' word timestamps are merged back into the
+# narration's own tokens (_restore_hyphen_tokens). Text inside [...] (tags) is left alone.
+_WIRE_HYPHEN = re.compile(r"(?<=\w)-(?=\w)(?![^\[\]]*\])")
+
+
+def _wire_text(text):
+    """Narration as sent to an English voice: in-token hyphens as spaces."""
+    return _WIRE_HYPHEN.sub(" ", text)
+
+
+def _restore_hyphen_tokens(words, narration_tokens, who="tts"):
+    """Word timestamps came back as the wire's tokens ("T-v" as "T" + "v"); merge them back into
+    the narration's own tokens by position — a hyphenated token spans its pieces."""
+    pieces = [len(_WIRE_HYPHEN.split(c)) for c in narration_tokens]
+    if sum(pieces) != len(words):
+        print(f"  [{who}] word count {len(words)} ≠ narration {sum(pieces)} — timestamps keep the provider's tokens")
+        return words
+    out, i = [], 0
+    for c, n in zip(narration_tokens, pieces):
+        out.append(dict(words[i], word=c, end=words[i + n - 1]["end"]))
+        i += n
+    return out
+
+
+def _restore_words(words, text):
+    """Drama 3's aligned words come back as the wire's tokens ("T-v" as "T" + "v"); put the
+    narration's own spoken tokens back by position."""
+    return _restore_hyphen_tokens(words, _drama3_module().spoken_text(text).split(), "drama3")
+
+
 def drama3_prefetch(texts, style=None):
     """Voice every text in one batch (in `style`, default the active one); call_drama3_api then
     serves them from the cache. Returns {text: error} for any that failed."""
@@ -179,10 +217,15 @@ def drama3_prefetch(texts, style=None):
     todo = [t for t in dict.fromkeys(texts) if t and (style, t) not in _DRAMA3['cache']]
     if not todo:
         return {}
-    out, errs = drama3_session().synthesize([(i, _styled(t, style)) for i, t in enumerate(todo)])
+    sess = drama3_session()
+    out, errs = sess.synthesize([(i, _styled(_wire_text(t), style)) for i, t in enumerate(todo)])
+    flags = getattr(sess, 'flags', {})
     for i, t in enumerate(todo):
         if i in out:
-            _DRAMA3['cache'][(style, t)] = out[i]
+            mp3, words = out[i]
+            _DRAMA3['cache'][(style, t)] = (mp3, _restore_words(words, t))
+            if flags.get(i):
+                _DRAMA3['flags'][(style, t)] = flags[i]
     return {todo[i]: e for i, e in errs.items()}
 
 
@@ -220,7 +263,36 @@ def call_drama3_api(text):
         errs = drama3_prefetch([text])
         if errs:
             raise RuntimeError(f"Drama 3: {errs[text]}")
+    _DRAMA3['last_flags'] = _DRAMA3['flags'].pop(key, [])
     return _DRAMA3['cache'].pop(key)
+
+
+STT_FLAGS = "stt_flags.json"
+
+
+def update_stt_flags(audio_dir, frame_number, flags, replaced_sentences=None):
+    """audio/stt_flags.json = {frame: [hear-back flags]} — sentences Drama 3 still misread after its
+    retakes (drama3_modal.hearback). A full frame write replaces the frame's entry; a sentence fix
+    (replaced_sentences) drops the flags of those sentences and adds the new take's."""
+    path = Path(audio_dir) / STT_FLAGS
+    data = json.loads(path.read_text()) if path.exists() else {}
+    key = str(frame_number)
+    if replaced_sentences is None:
+        kept = []
+    else:
+        norm = lambda t: " ".join(re.findall(r"[a-z]+", t.lower()))
+        gone = {norm(x) for x in replaced_sentences}
+        kept = [f for f in data.get(key, []) if norm(f["sentence"]) not in gone]
+    data[key] = kept + list(flags)
+    if not data[key]:
+        data.pop(key)
+    if data:
+        path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    elif path.exists():
+        path.unlink()
+    for f in flags:
+        print(f"      ⚠ hear-back: kept a take still misheard ({f['kind']}) — "
+              f"said …{f['sentence'][:60]}… heard …{f['whisper']}… (listen; fix with fix_tts_sentence.py)")
 
 
 _env_provider = os.getenv('TTS_PROVIDER', '').strip().lower()
@@ -411,12 +483,15 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
         return call_drama3_api(text)
     if not ELEVENLABS_API_KEY:
         raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
+    # English narration in the default voice goes out with in-token hyphens as spaces (see
+    # _WIRE_HYPHEN); an explicit voice_id or a language_code request is sent as written.
+    wire = not voice_id and not language_code
 
     try:
         import base64
 
         kwargs = dict(
-            text=text,
+            text=_wire_text(text) if wire else text,
             voice_id=voice_id or VOICE_ID,
             model_id=MODEL_ID if PROVIDER == 'elevenlabs' else ELEVENLABS_MODEL_ID,
             output_format=OUTPUT_FORMAT,
@@ -442,6 +517,8 @@ def call_elevenlabs_api(text, voice_id=None, speed=None, language_code=None):
                 alignment.character_start_times_seconds,
                 alignment.character_end_times_seconds,
             )
+            if wire and words and _WIRE_HYPHEN.search(text):
+                words = _restore_hyphen_tokens(words, text.split(), "elevenlabs")
 
         return audio_bytes, words
 
@@ -537,12 +614,14 @@ def call_cartesia_api(text):
     if not CARTESIA_API_KEY:
         raise ValueError("CARTESIA_API_KEY not found in environment variables")
     pcm, words = b'', []
-    for chunk in _sentence_chunks(text, CARTESIA_MAX_CHARS, 'Cartesia'):
+    for chunk in _sentence_chunks(_wire_text(text), CARTESIA_MAX_CHARS, 'Cartesia'):
         c_pcm, c_words = _cartesia_stream(chunk.strip())
         offset = len(pcm) / 2 / CARTESIA_SAMPLE_RATE
         words += [{'word': w['word'], 'start': round(w['start'] + offset, 3),
                    'end': round(w['end'] + offset, 3)} for w in c_words]
         pcm += c_pcm
+    if _WIRE_HYPHEN.search(text):
+        words = _restore_hyphen_tokens(words, text.split(), "cartesia")
     return _pcm16_to_mp3(pcm, CARTESIA_SAMPLE_RATE), words
 
 
@@ -591,17 +670,23 @@ def call_heygen_api(text):
     if not HEYGEN_API_KEY:
         raise ValueError("HEYGEN_API_KEY not found in environment variables")
     pcm, rate, words = b'', None, []
-    for chunk in _sentence_chunks(text, HEYGEN_MAX_CHARS, 'HeyGen'):
+    for chunk in _sentence_chunks(_wire_text(text), HEYGEN_MAX_CHARS, 'HeyGen'):
         c_pcm, rate, c_words = _heygen_stream(chunk.strip())
         offset = len(pcm) / 2 / rate
         words += [{'word': w['word'], 'start': round(w['start'] + offset, 3),
                    'end': round(w['end'] + offset, 3)} for w in c_words]
         pcm += c_pcm
+    if _WIRE_HYPHEN.search(text):
+        words = _restore_hyphen_tokens(words, text.split(), "heygen")
     return _pcm16_to_mp3(pcm, rate), words
 
 
 def save_timestamps(output_dir: str, frame_number: int, text: str, words: List[Dict]) -> None:
-    """Persist word timestamps next to the frame audio for downstream consumers."""
+    """Persist word timestamps next to the frame audio for downstream consumers (+ the frame's
+    Drama 3 hear-back flags, audio/stt_flags.json)."""
+    if PROVIDER == 'drama3':
+        update_stt_flags(output_dir, frame_number, _DRAMA3['last_flags'])
+        _DRAMA3['last_flags'] = []
     path = os.path.join(output_dir, f"frame_{frame_number}_timestamps.json")
     with open(path, 'w', encoding='utf-8') as f:
         json.dump({

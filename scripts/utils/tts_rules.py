@@ -139,37 +139,31 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
      and code listings in their normal written form (`UTXO`, not `U T X O`;
      `OP_CHECKSIG`, not `O P check sig`; `0xDEADBEEF`, not `0 x D E A D B E E F`).
 
-   - **Hyphen-bind tightly-set math notation** so TTS reads it as one unit, not
-     drifting letters (ElevenLabs voices "A X" as two loose letters; "A-X" pulls them
-     together). Applies to math/finance/stats symbols in the `narration` field:
-       - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B".
-       - **Greek-letter name + variable — ALWAYS hyphenate:** `Δx` → "delta-X",
-         `Δt` → "delta-T", `λt` → "lambda-T", `λI` → "lambda-I", `σ_i` → "sigma-I",
-         `θ_A` → "theta-A", `2πr` → "two pi-R", `βv²` → "beta-V squared", `e^λt` → "e
-         to the lambda-T"; a chain keeps every hyphen ("delta-Y over delta-X"). Written
-         spaced — "delta X" — ElevenLabs drops a beat of dead air between the two
-         tokens ("delta … X") instead of voicing one quantity. Two shapes are NOT
-         compounds and stay spaced: a Greek letter followed by a differential
-         (`dθ/dt` → "d theta d t", `λ dx` → "lambda d x") and the Python keyword
-         `lambda x:` ("lambda X, colon …" is prose, not a symbol).
-       - Letter/word subscripts — hyphen only, never the spoken word "sub":
-         `A_x` → "A-X", `B_y` → "B-Y", `sigma_n` → "sigma-N", `F_net` → "F-net"
-         (numeric subscripts keep `a_1` → "A-one", above). The frame shows the
-         subscript, so voicing "sub" adds nothing and grates in subscript-heavy
-         narration. Voice-verified 2026-08-25: the hyphen alone keeps the letters
-         apart — "A-N", "M-R", "X-I" read as spelled letters, not "an" / "mister"
-         / "xi". Reserve an explicit "sub" for a compound subscript that would
-         otherwise be ambiguous (`x_{{i+1}}` → "X sub I plus one").
-       - Hats / accents: `Â` → "A-hat", `x̂` → "X-hat", `\bar{{x}}` → "X-bar". The
-         hyphen also stops "A-hat" being misread as "uh hat".
-     On-screen labels/equations keep normal notation; only the spoken narration hyphenates.
-   - **Never begin a sentence with the variable name "A"** — including the hyphenated
-     forms above (`A-hat`, `A-X`). A sentence-initial "A" is read as the
-     article "a" (uh) — "A times B equals C" comes out "Uh times B equals C", and the
-     hyphen does NOT rescue it ("A-hat is ..." still leads with "uh"). When "A" names
+   - **Tightly-set math notation — separate the tokens with SPACES, never hyphens**
+     (2026-10-20). A hyphen inside a spoken token is read aloud by some voices
+     ("T-v" came out "T minus v", "y-z" as "y dash z"); spaced letters time fine.
+     Applies to math/finance/stats symbols in the `narration` field:
+       - Adjacent products / juxtaposition: `Ax` → "A X", `AB` → "A B".
+       - Greek-letter name + variable: `Δx` → "delta X", `Δt` → "delta T", `λt` →
+         "lambda T", `λI` → "lambda I", `σ_i` → "sigma I", `θ_A` → "theta A", `2πr` →
+         "two pi R", `βv²` → "beta V squared", `e^λt` → "e to the lambda T"
+         ("delta Y over delta X"). The Python keyword `lambda x:` is prose ("lambda
+         X, colon …"), not a symbol.
+       - Letter/word subscripts — never the spoken word "sub": `A_x` → "A X", `B_y` →
+         "B Y", `sigma_n` → "sigma N", `F_net` → "F net" (numeric subscripts: `a_1`
+         → "A one", above). The frame shows the subscript, so voicing "sub" adds
+         nothing and grates in subscript-heavy narration. Reserve an explicit "sub"
+         for a compound subscript that would otherwise be ambiguous (`x_{{i+1}}` →
+         "X sub I plus one").
+       - Hats / accents: `Â` → "A hat", `x̂` → "X hat", `\bar{{x}}` → "X bar".
+     On-screen labels/equations keep normal notation; only the spoken narration spaces them.
+   - **Never begin a sentence with the variable name "A"** — including the compound
+     forms above (`A hat`, `A X`). A sentence-initial "A" is read as the
+     article "a" (uh) — "A times B equals C" comes out "Uh times B equals C", and
+     "A hat is ..." still leads with "uh". When "A" names
      a matrix, vector, variable, list, or column, lead with the noun it labels:
-     "Matrix A times B ..." not "A times B ..."; "The estimator A-hat ..." not
-     "A-hat is ...". This applies ONLY to "A" — it is the one letter that collides
+     "Matrix A times B ..." not "A times B ..."; "The estimator A hat ..." not
+     "A hat is ...". This applies ONLY to "A" — it is the one letter that collides
      with the article. Every other letter (B, C, X, P, …) reads correctly at the
      start of a sentence; leave those alone. A genuine article ("A vector is ...") is
      of course fine, and "A" as a name mid-sentence is also fine.
@@ -225,10 +219,10 @@ TECHNICAL_NARRATION_TTS_RULES = """   - **Long raw character strings — spell o
          variable `a` is spoken next to an operator word, an argument, or at a clause
          end, lowercase `a` reads as the article "uh". Uppercase it: "A times t" (not
          "a times t"), "A of t" (not "a of t"), "one-half A t squared" (not "... a t
-         squared"), "A-t" / "A-t-squared" (not "a-t"), "the slope is A" / "the constant
-         acceleration A" (not "... a"), "A equals d-v d-t" (not "a equals ..."). Only
+         squared"), "A t" / "A t squared" (not "a t"), "the slope is A" / "the constant
+         acceleration A" (not "... a"), "A equals d v d t" (not "a equals ..."). Only
          `a` collides with the article — leave b, c, t, x lowercase. Indexed/subscripted
-         variables too: `a_1, a_2, a_3` → "A-one, A-two, A-three" (uppercase, hyphenated),
+         variables too: `a_1, a_2, a_3` → "A one, A two, A three" (uppercase, spaced),
          never "a one, a two, a three" (TTS reads lowercase "a one" as the article "uh
          one"). The sentence-initial "A" rule above applies to code variables too — never
          start a sentence with the name "A".
@@ -337,7 +331,7 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
          as the verb "do"). Partials: write "partial" for ∂ — "partial f over
          partial x". Second derivatives: "d squared y over d x squared".
        - **Hyperbolic functions, mu / rho / chi — write the alias** from the
-         pronunciation-alias table below ("sinch", "mew-hat", "kai-squared").
+         pronunciation-alias table below ("sinch", "mew hat", "kai squared").
        - **Initialisms — space the letters** if you would say them letter-by-letter:
          `ODE` → "O D E", `IVP` → "I V P", `PDE` → "P D E", `RHS` → "R H S". Leave
          ones pronounced as words alone. Years spoken aloud follow the number rule:
@@ -348,45 +342,38 @@ MATH_NARRATION_TTS_RULES = """   - **TTS-safe narration (CRITICAL — every fram
          generic variable `a` is spoken next to an operator word, an argument, or at a
          clause end, lowercase `a` reads as the article "uh". Uppercase it: "A times t"
          (not "a times t"), "A of t" (not "a of t"), "one-half A t squared" (not "... a t
-         squared"), "A-t" / "A-t-squared" (not "a-t"), "the slope is A" / "the constant
-         acceleration A" (not "... a"), "A equals d-v d-t" (not "a equals ..."). Only `a`
+         squared"), "A t" / "A t squared" (not "a t"), "the slope is A" / "the constant
+         acceleration A" (not "... a"), "A equals d v d t" (not "a equals ..."). Only `a`
          collides with the article — leave b, c, t, x lowercase. Subscripted variables are
-         uppercase and hyphenated: `a_1, a_2` → "A-one, A-two" — never lowercase
+         uppercase and spaced: `a_1, a_2` → "A one, A two" — never lowercase
          "a one" (TTS reads it as the article "uh one").
-       - **Hyphen-bind tightly-set notation** so TTS reads it as one unit, not
-         drifting letters (ElevenLabs voices "A X" as two loose letters; "A-X" pulls
-         them together):
-           - Adjacent products / juxtaposition: `Ax` → "A-X", `AB` → "A-B",
-             `rθ` → "R-theta".
-           - **Greek-letter name + variable — ALWAYS hyphenate:** `Δx` → "delta-X",
-             `Δt` → "delta-T", `λt` → "lambda-T", `λI` → "lambda-I", `σ_i` →
-             "sigma-I", `θ_A` → "theta-A", `2πr` → "two pi-R", `βv²` → "beta-V
-             squared", `e^λt` → "e to the lambda-T"; a chain keeps every hyphen
-             ("delta-Y over delta-X", "delta-F over delta-X"). Written spaced —
-             "delta X" — ElevenLabs drops a beat of dead air between the two tokens
-             ("delta … X") instead of voicing one quantity. A Greek letter followed
-             by a differential is NOT a compound and stays spaced: `dθ/dt` → "d theta
-             d t", `λ dx` → "lambda d x".
-           - Letter/word subscripts — hyphen only, never the spoken word "sub":
-             `A_x` → "A-X", `sigma_n` → "sigma-N", `F_net` → "F-net" (numeric
-             subscripts keep "A-one" above). The slide shows the subscript, so
-             voicing "sub" adds nothing and grates when subscripts are frequent;
-             the hyphen alone keeps the letters apart (voice-verified 2026-08-25:
-             "A-N" / "M-R" / "X-I" read as spelled letters). Reserve an explicit
-             "sub" for a compound subscript that would otherwise be ambiguous
-             (`x_{{i+1}}` → "X sub I plus one").
-           - Hats / accents: `Â` → "A-hat", `x̂` → "X-hat", `\bar{{x}}` → "X-bar",
-             `\tilde{{p}}` → "P-tilde". The hyphen also stops "A-hat" being misread as
-             "uh hat".
-         On-screen equations keep normal notation; only the spoken narration hyphenates.
+       - **Tightly-set notation — separate the tokens with SPACES, never hyphens**
+         (2026-10-20). A hyphen inside a spoken token is read aloud by some voices
+         ("T-v" came out "T minus v", "e to the minus A-T" as "minus A minus T", "y-z"
+         as "y dash z"); spaced letters time fine:
+           - Adjacent products / juxtaposition: `Ax` → "A X", `AB` → "A B",
+             `rθ` → "R theta", `Tv` → "T v", `T*v` → "T star v".
+           - Greek-letter name + variable: `Δx` → "delta X", `Δt` → "delta T", `λt` →
+             "lambda T", `λI` → "lambda I", `σ_i` → "sigma I", `θ_A` → "theta A",
+             `2πr` → "two pi R", `βv²` → "beta V squared", `e^λt` → "e to the lambda
+             T" ("delta Y over delta X"). A Greek letter followed by a differential:
+             `dθ/dt` → "d theta d t", `λ dx` → "lambda d x".
+           - Letter/word subscripts — never the spoken word "sub": `A_x` → "A X",
+             `sigma_n` → "sigma N", `F_net` → "F net" (numeric subscripts: "A one"
+             above). The slide shows the subscript, so voicing "sub" adds nothing and
+             grates when subscripts are frequent. Reserve an explicit "sub" for a
+             compound subscript that would otherwise be ambiguous (`x_{{i+1}}` → "X
+             sub I plus one").
+           - Hats / accents: `Â` → "A hat", `x̂` → "X hat", `\bar{{x}}` → "X bar",
+             `\tilde{{p}}` → "P tilde".
+         On-screen equations keep normal notation; only the spoken narration spaces them.
 """ + alias_prompt_block(math=True) + """
-   - **Never begin a sentence with the variable name "A"** — including the hyphenated
-     forms above (`A-hat`, `A-X`, `A-one`). A sentence-initial "A" is read
+   - **Never begin a sentence with the variable name "A"** — including the compound
+     forms above (`A hat`, `A X`, `A one`). A sentence-initial "A" is read
      as the article "a" (uh) — "A is a matrix with ..." comes out "Uh is a matrix
-     with ...", and the hyphen does NOT rescue it ("A-hat is ..." still leads with
-     "uh"). When "A" names a matrix, vector, or variable, lead with the noun it
-     labels: "Matrix A is ..." not "A is a matrix ..."; "The estimator A-hat is ..."
-     not "A-hat is ...". This applies ONLY to "A" — it is the one letter that
+     with ...", and "A hat is ..." still leads with "uh". When "A" names a matrix,
+     vector, or variable, lead with the noun it labels: "Matrix A is ..." not "A is
+     a matrix ..."; "The estimator A hat is ..." not "A hat is ...". This applies ONLY to "A" — it is the one letter that
      collides with the article. Every other single letter (B, C, X, P, …) reads
      correctly at the start of a sentence; do not rewrite those. "A" mid-sentence is
      also fine.

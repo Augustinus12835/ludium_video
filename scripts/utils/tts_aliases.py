@@ -22,8 +22,9 @@ Entry fields:
              text ("that is" for i.e.) and is never compacted
   scope      "all" (every mode) or "math" (Manim math/technical/recitation videos only —
              "chi" in a history video is a word, not a statistic)
-  component  also matches as one part of a hyphen compound ("mu-hat" → "mew-hat",
-             "chi-squared" → "kai-squared"); otherwise only a standalone token (possessive 's allowed)
+  component  also matches as one part of a compound, spaced or (legacy) hyphenated ("mu hat" →
+             "mew hat", "chi-squared" → "kai-squared"); otherwise only a standalone token
+             (possessive 's allowed)
   not_before words after which the spoken form is ordinary English and must NOT be compacted
              (none needed yet — see the note on "pie" above the table)
 
@@ -33,7 +34,10 @@ letter-by-letter, and differentials — those have their own rules and detectors
 
 Add an entry when a voice mispronounces a token that recurs (a one-off proper noun can simply be
 reworded). A spoken form that must be compacted back has to be ONE token (no spaces) — the
-compactor works per word; --self-test enforces it.
+compactor works per word; --self-test enforces it. That is why "cap-M" keeps its hyphen while
+notation is spaced (2026-10-20): the TTS wire sends in-token hyphens as spaces on every English
+provider (generate_tts_elevenlabs._wire_text), so the voice hears "cap M" and the word timestamps
+keep the one token the compactor maps back to "CAPM".
 
 CLI:  python -m scripts.utils.tts_aliases --self-test | --table [--math]
 """
@@ -200,14 +204,14 @@ def alias_prompt_block(math: bool) -> str:
         "     |---------|----------------|",
     ]
     for a in say:
-        extra = " (also inside hyphen compounds)" if a.component else ""
+        extra = " (also inside compounds)" if a.component else ""
         lines.append(f"     | `{a.written}` | \"{a.spoken}\"{extra} |")
     if words:
         lines.append("     Write these out in words: " + "; ".join(
             f"`{a.written}` → \"{a.spoken}\"" for a in words) + ".")
     if math:
-        lines.append("     Compounds keep the alias: `μ̂` → \"mew-hat\", `μ_1` → \"mew-one\", "
-                     "`χ²` → \"kai-squared\", `ρ_xy` → \"roe-X-Y\".")
+        lines.append("     Compounds keep the alias, spaced like any notation: `μ̂` → \"mew hat\", "
+                     "`μ_1` → \"mew one\", `χ²` → \"kai squared\", `ρ_xy` → \"roe X Y\".")
     return "\n".join(lines)
 
 
@@ -229,6 +233,7 @@ def _self_test() -> int:
         ("the hyperbolic sine, sinh of x", True, ["sinh"]),
         ("arcsinh of x", True, ["arcsinh"]),
         ("mu-hat and mu-one", True, ["mu"]),
+        ("mu hat and mu one", True, ["mu"]),
         ("Mu-hat is unbiased", True, ["mu"]),
         ("mu-hat and mu-one", False, []),
         ("chi-square with one degree", True, ["chi"]),
@@ -241,6 +246,7 @@ def _self_test() -> int:
         ("Thessaly and the Thessalians", False, ["Thessaly", "Thessalians"]),
         ("By Euler's definition, an Eulerian path", False, ["Euler", "Eulerian"]),
         ("a mew-hat, sinch of x, the cap-M, roe-one", True, []),
+        ("a mew hat, mew one, kai squared", True, []),
         ("the machine learning muon", True, []),
     ]
     for text, math, want in gate_cases:

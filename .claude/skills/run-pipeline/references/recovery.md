@@ -112,15 +112,17 @@ in `scripts/utils/narration_check.py` and `scripts/utils/tts_rules.py`. Summary:
 | `greek` / `math_symbol` | the name ("alpha", "square root of", "times", "degrees") |
 | `hex` / `opaque` | spaced characters ("0 x D E A D…") |
 | `differential` | spaced ("d x") |
-| `greek_compound` | hyphen-bind the Greek letter to its variable: "delta X" → "delta-X", "lambda t" → "lambda-T", "two pi R" → "two pi-R" (spaced, the voice drops dead air between the tokens). Skips the article, a following differential ("d theta d t") and Python's `lambda X, colon` |
+| `hyphen` | space hyphen-bound notation: "T-v" → "T v", "delta-X" → "delta X", "A-one" → "A one", "x-hat" → "x hat" (a voice reads an in-token hyphen as "minus"/"dash"). Manim scripts only; ordinary compounds ("x-axis", "second-order") are not flagged |
 | `acronym` | spaced letters ("U T X O"; allowlisted ones aren't flagged). Includes mixed-case initialisms — "VaR" is voiced "var", so write "value at risk"; also "CVaR", "DoS" — and plural/possessive forms ("UTXOs" → "U T X Os") |
 | `code_token` | spoken prose ("my func", "is equal to") |
-| `variable_a` | uppercase the variable: "A-one", "A times t", "slope A" (lowercase `a` reads as the article; only `a` collides) |
+| `variable_a` | uppercase the variable: "A one", "A times t", "slope A" (lowercase `a` reads as the article; only `a` collides) |
 | `sentence_a` | rephrase so "A" isn't the first word ("Matrix A times…") |
 
-Preferred notation forms (never flagged): `Ax`→"A-X", `A_x`→"A-X", `sigma_n`→"sigma-N",
-`a_1`→"A-one", `Â`→"A-hat", `\bar{x}`→"X-bar". Subscripts are hyphen-bound with no spoken
-"sub"; older "A-sub-X" narration isn't wrong, so don't rewrite an already-voiced video for it.
+Preferred notation forms (never flagged): `Ax`→"A X", `A_x`→"A X", `sigma_n`→"sigma N",
+`a_1`→"A one", `Â`→"A hat", `\bar{x}`→"X bar" — spaced, never hyphenated, with no spoken
+"sub". Already-voiced hyphenated narration need not be re-voiced unless the audio is heard
+saying "minus"/"dash"; every English provider now sends in-token hyphens as spaces, so
+re-voicing an old sentence as written is safe.
 
 Fix the source the report names — `script.json` narration for every frame class. (Only a
 legacy pre-2026-08-30 video names `natural_narration` in `math_verification.json`; fix both

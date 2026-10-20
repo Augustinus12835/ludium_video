@@ -14,7 +14,9 @@ frame_N_timestamps.json, tts_meta.json), so `pipeline.py` sees tts COMPLETE and 
 
 Each video passes the pre-TTS narration gate first (SKIP_NARRATION_CHECK=1 bypasses a confirmed
 false positive). A video already part-voiced in another narrator is skipped (one narrator per
-video). Frames whose speaking rate looks wrong (a skipped or doubled sentence) are flagged.
+video). Frames whose speaking rate looks wrong (a skipped or doubled sentence) are flagged, and
+sentences the in-container hear-back still misheard after its retakes are listed per video
+(audio/stt_flags.json).
 """
 import json
 import os
@@ -127,6 +129,15 @@ def main():
                 print(f"  ✗ {vd.parent.name}/{vd.name} frame {f.number}: {peak[0]:.1f} words/s at "
                       f"{peak[1]:.0f}s — words crammed, audio likely CUT OFF there; re-voice the frame")
     print(f"  {flags} frame(s) flagged" if flags else "  all frames in range")
+    # Hear-back (drama3_modal.hearback): takes Whisper + CTC still misheard after the retakes.
+    heard = [(vd, json.loads((vd / "audio" / tts.STT_FLAGS).read_text())) for vd, *_ in plan
+             if (vd / "audio" / tts.STT_FLAGS).exists()]
+    if heard:
+        print("\nHear-back — sentences still misheard after retakes (listen; fix with fix_tts_sentence.py or keep):")
+        for vd, fl in heard:
+            print(f"  ⚠ {vd.parent.name}/{vd.name}: {sum(map(len, fl.values()))} sentence(s) — {vd / 'audio' / tts.STT_FLAGS}")
+    else:
+        print("\nHear-back: every take heard as written.")
     if blocked:
         print(f"\n✗ {len(blocked)} video(s) blocked by the narration gate: " + ", ".join(map(str, blocked)))
     sys.exit(1 if failed or blocked else 0)

@@ -327,14 +327,25 @@ numerals are correct and stay as digits; only the spoken text changes.
 **Automated pre-TTS narration gate.** The tts step halts before any audio is
 generated if TTS-unfriendly tokens survive in the spoken narration — raw
 numerals, Greek letters, math symbols, hex strings, unspaced differentials,
-unhyphenated Greek-letter compounds (`delta X` must be `delta-X`, or the voice
-drops dead air between the tokens), bare initialisms, code tokens, the
+hyphen-bound notation (`hyphen`: `T-v` must be `T v`, `delta-X` `delta X`, `A-one`
+`A one`; Manim scripts only), bare initialisms, code tokens, the
 lowercase variable `a`, sentences starting with the name `A`, and a written form the alias
-library respells (`alias`: sinh → "sinch", mu-hat → "mew-hat", CAPM → "cap-M"; math-scope
+library respells (`alias`: sinh → "sinch", mu hat → "mew hat", CAPM → "cap-M"; math-scope
 entries only in Manim scripts). `scripts/utils/narration_check.py` scans the same source TTS
 reads and reports offenders by category; it detects only, never rewrites. Fix
 each token in the named source and resume `--from tts`; bypass a confirmed
 false positive with `SKIP_NARRATION_CHECK=1`.
+
+**No hyphens inside spoken notation.** Narration used to hyphen-bind math notation
+("delta-X", "A-one", "y-z") because ElevenLabs v2 timed spaced letters with dead air. Drama 3
+reads an in-token hyphen aloud ("T-v" → "T minus v", "e to the minus A-T" → "minus A minus T";
+an STT pass heard "minus"/"dash" in ~12% of sentences with a dashed token), so the prompts
+(`tts_rules.py`) write notation spaced ("delta X", "A one", "T v", "x hat"), the gate's `hyphen`
+category rejects the old form, and every English provider (ElevenLabs, Cartesia, HeyGen, Drama 3;
+not an explicit `--voice-id`) sends any surviving in-token hyphen as a space and merges the word
+timestamps back into the narration's own tokens (`_WIRE_HYPHEN` in `generate_tts_elevenlabs.py`),
+so subtitles and Manim cue anchors on older scripts are unchanged. "cap-M" keeps its hyphen: an
+alias the subtitles map back must be one token.
 
 ### TTS providers and pronunciation aliases
 
@@ -386,11 +397,23 @@ forced alignment still places every word, so the timestamps hide it. `drama3_mod
 compares each chunk with what the aligner's CTC model *hears* (greedy decode, no language model;
 Whisper-style ASR autocompletes a cut "oth–" to "other"), plus silence runs >= 3 s and an end at
 full volume. A failed chunk is re-voiced in the same container, up to 3 more takes, and then the
-frame fails. `fix_tts_sentence.py` keeps a re-voiced word's decay (a CTC end time sits inside the
+frame fails.
+
+**Hear-back.** Misreads pass clip QA (the right amount of speech is there): Drama 3 can read an
+in-token hyphen as "minus"/"dash" or garble a stretch of notation ("T mass v"). So Whisper
+large-v3 and the CTC aligner both hear every clip in the same container (`drama3_modal.hearback`,
+pure python): a stray "minus"/"dash"/"hyphen" heard by either listener, or a stretch that BOTH hear
+differently from the script, re-voices the chunk (same 3 retakes). Calibrated on ~1,300
+human-labelled clips: 136 of 140 misreads caught, 0 of 140 corrected takes flagged. A take still
+misheard after the retakes is kept and listed in `audio/stt_flags.json` (frame → sentence, what
+Whisper heard); `tts_drama3_batch.py` ends with a "Hear-back" summary. Listen to each flagged
+sentence and fix it with `fix_tts_sentence.py` (`--resay` re-voices it unchanged), or keep it and
+delete the entry. The listeners cost no extra start-up; the engine runs at
+`ENGINE_MEM_FRACTION` 0.60 of the H100 so Whisper + the aligner fit beside it. `fix_tts_sentence.py` keeps a re-voiced word's decay (a CTC end time sits inside the
 final phoneme), and a frame's last sentence may grow the clip by ~0.15 s.
 
 There is no provider pronunciation dictionary. A token voices misread is respelled IN THE
-NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew-hat" for μ̂, "cap-M" for
+NARRATION from `scripts/utils/tts_aliases.py` ("sinch" for sinh, "mew hat" for μ̂, "cap-M" for
 CAPM); one table feeds the script prompts, the pre-TTS gate (`alias`) and the subtitle
 compactor, which maps the alias back. Keep it small: add an entry only for a recurring
 mispronunciation actually heard, with a spoken form that is never ordinary English ("pie" for
@@ -401,7 +424,10 @@ pi fails: "the size of the pie"). Self-test: `python -m scripts.utils.tts_aliase
 Auto-runs in the pipeline. Built from per-frame ElevenLabs word timestamps
 stacked by decoded audio durations, with a 300 ms display lead; expect the
 printed drift line under ~120 ms. Scribe re-transcription runs only as a
-fallback for videos without timestamp files.
+fallback for videos without timestamp files. Spoken math compacts to written form
+(`scripts/utils/subtitle_compact.py`): "delta X" → ΔX, "v one" → v₁, "i hat" → î, "M G" → mg,
+and the older hyphenated forms ("delta-X", "i-hat") compact the same way. Self-test:
+`python -m scripts.utils.subtitle_compact --self-test`.
 
 ```bash
 python scripts/generate_subtitles.py pipeline/LECTURE --video 3
@@ -430,7 +456,7 @@ fallback transcription — compile and subtitle must run serially.
 | `generate_tts_elevenlabs.py` | TTS audio + exact word timestamps — ElevenLabs (default), `--profile cartesia` / `heygen` / `drama3` |
 | `tts_drama3_batch.py` | Drama 3: voice many videos/lectures in ONE Modal GPU session (the cheap way) |
 | `utils/drama3_tags.py` | Drama 3 delivery tags: whitelist + word-identity gate, tagging prompt, `apply` / `check` |
-| `drama3_modal.py` | Drama 3 on Modal: image, warm server + forced aligner, `Session`; `download` once |
+| `drama3_modal.py` | Drama 3 on Modal: image, warm server + forced aligner + clip QA + hear-back (Whisper large-v3), `Session`; `download` once |
 | `fix_tts_sentence.py` | Zero-shift sentence-swap TTS fix (edit source → run → recompile) |
 | `generate_math_animation.py` | Render pre-authored `frame_N_manim.py` in parallel; color-link lint |
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |

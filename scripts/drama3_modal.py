@@ -8,6 +8,10 @@ inputs/voice/drama3_refs/: ref_1.wav + ref_1.txt …, each clip <= 60 s, the .tx
 transcript). The server returns audio only, so every clip is force-aligned on the same GPU
 (wav2vec2 CTC over the narration's own tokens) and comes back with word timestamps in the same
 shape as the hosted providers'.
+Every clip is also checked before it ships: clip QA (cut off mid-word, silent stretches) and a
+hear-back (Whisper large-v3 + the CTC model listen for misreads such as a hyphen read as "minus");
+a failing chunk is re-voiced in the same container, and a misread that survives the retakes is
+kept and listed in audio/stt_flags.json.
 
 Cost: Modal's Starter plan includes US$30/month of free compute. A session pays ~3-4 min of H100
 start-up (~US$0.25), then ~15 s (~US$0.02) per 10 min of narration with 16 requests in flight,
@@ -41,6 +45,7 @@ REFS_DIR = Path(os.getenv("DRAMA3_REFS_DIR") or REPO / "inputs" / "voice" / "dra
 if not REFS_DIR.is_absolute():
     REFS_DIR = REPO / REFS_DIR
 CONCURRENCY = 16          # the engine's max_running_requests default
+ENGINE_MEM_FRACTION = "0.60"   # engine share of the H100; the rest must also hold Whisper + aligner
 MAX_CHUNK_CHARS = 900     # longer frames are voiced and aligned in sentence-aligned chunks. Drama 3
                           # stops a request at ~95 s of audio (~15 chars/s): 1500-char chunks silently
                           # lost the tail of long frames in production; 900 ≈ 60 s.
@@ -188,6 +193,145 @@ def check_clip(audio16k, words, heard):
     return probs
 
 
+# Hear-back. Drama 3 also MISREADS, which check_clip cannot see (the right amount of speech is
+# there): an in-token hyphen read as "minus" or "dash" ("T-v" -> "T minus v": in production ~12% of
+# sentences with a dashed token) or garbled ("T mass v"). Two listeners hear every clip: Whisper
+# large-v3 (a language model: it writes clean words) and the aligner's own CTC model (letters, no
+# language model). Calibrated on ~1,300 human-labelled clips:
+#   a stray "minus"/"dash"/"hyphen" heard by EITHER listener: 136 of 140 misreads caught, 2 of
+#   1,007 clean sentences flagged, 0 of 140 corrected takes;
+#   a stretch where BOTH listeners hear something other than the script: caught the garbles (all
+#   real on listening), 0 of 140 corrected takes. (Whisper alone glues letters, "T v" -> "TV", and
+#   drops stretches of maths; CTC alone misspells; where both disagree with the script, the voice
+#   usually did.)
+# A flagged chunk is re-voiced like a QA failure; one still flagged after QA_RETRIES keeps its last
+# take and the flags travel back with it (audio/stt_flags.json) for a person to listen to.
+WHISPER_MODEL = "openai/whisper-large-v3"
+HB_BAD = ("minus", "dash", "dashes", "hyphen")
+HB_GAP_LETTERS = 8        # script letters in a row that BOTH listeners missed
+HB_INSERT_LETTERS = 4     # letters BOTH listeners heard at the same spot that the script lacks
+HB_TOLERANCE = 4          # "the same spot", in script letters
+_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+         "fifteen sixteen seventeen eighteen nineteen").split()
+_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+
+
+def _say(n):
+    n = int(n)
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        return _TENS[n // 10] + ("" if n % 10 == 0 else " " + _ONES[n % 10])
+    if n < 1000:
+        return _ONES[n // 100] + " hundred" + ("" if n % 100 == 0 else " " + _say(n % 100))
+    if n < 10 ** 6:
+        return _say(n // 1000) + " thousand" + ("" if n % 1000 == 0 else " " + _say(n % 1000))
+    return str(n)
+
+
+def hb_words(text):
+    """Lower-case words with digits spelled out (Whisper writes "2x", the script "two x")."""
+    t = text.lower().replace("%", " percent ")
+    t = re.sub(r"(\d+)\.(\d+)", lambda m: _say(m.group(1)) + " point " + " ".join(_ONES[int(c)] for c in m.group(2)), t)
+    t = re.sub(r"\d+", lambda m: " " + _say(m.group(0)) + " ", t)
+    return [w.strip("'") for w in re.sub(r"[^a-z' ]+", " ", t).split() if w.strip("'")]
+
+
+def _covered(script, heard, minblock=3):
+    """script/heard: letter strings -> (covered[] per script letter, [(script_pos, extra_letters)])."""
+    import difflib
+    sm = difflib.SequenceMatcher(None, script, heard, autojunk=False)
+    cov, ins, pa, pb = [False] * len(script), [], 0, 0
+    for b in sm.get_matching_blocks():
+        if b.size >= minblock or b.size == 0:
+            if (b.b - pb) - (b.a - pa) > 0:
+                ins.append((b.a, (b.b - pb) - (b.a - pa)))
+            cov[b.a:b.a + b.size] = [True] * b.size
+            pa, pb = b.a + b.size, b.b + b.size
+    return cov, ins
+
+
+def _near(script_w, heard_w, i, pad=3):
+    """The heard words around script word i (word-level alignment)."""
+    import difflib
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, script_w, heard_w, autojunk=False).get_opcodes():
+        if i1 <= i < max(i2, i1 + 1):
+            if op == "equal":
+                j1 = j2 = j1 + (i - i1)
+            return " ".join(heard_w[max(0, j1 - pad):j2 + pad])
+    return ""
+
+
+def hearback(words, whisper, ctc):
+    """Misreads in one clip ([] = fine). words: the spoken tokens; whisper/ctc: what each heard.
+    -> [{"kind", "word" (index into words), "whisper", "ctc"}]. Pure python (also runs locally)."""
+    import collections
+    import difflib
+    sw, ww, cw = [], hb_words(whisper), hb_words(ctc)
+    owner_w = []                                   # normalised word -> token index
+    for ti, t in enumerate(words):
+        for w in hb_words(t):
+            sw.append(w); owner_w.append(ti)
+    if not sw:
+        return []
+    out = []
+    script_n = collections.Counter(sw)
+    for heard in (ww, cw):
+        if not any(collections.Counter(heard)[b] > script_n[b] for b in HB_BAD):
+            continue
+        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, sw, heard, autojunk=False).get_opcodes():
+            if op != "equal" and any(heard[j1:j2].count(b) > sw[i1:i2].count(b) for b in HB_BAD):
+                i = min(i1, len(sw) - 1)
+                out.append({"kind": "stray word", "word": owner_w[i],
+                            "whisper": _near(sw, ww, i), "ctc": _near(sw, cw, i)})
+                break
+        if out:
+            break
+    s_letters, owner_l = "", []
+    for i, w in enumerate(sw):
+        s_letters += w; owner_l += [i] * len(w)
+    cov_w, ins_w = _covered(s_letters, "".join(ww))
+    cov_c, ins_c = _covered(s_letters, "".join(cw))
+    run = 0
+    for k in range(len(s_letters)):
+        run = run + 1 if not (cov_w[k] or cov_c[k]) else 0
+        if run == HB_GAP_LETTERS:
+            i = owner_l[k - run + 1]
+            out.append({"kind": "not heard", "word": owner_w[i], "whisper": _near(sw, ww, i), "ctc": _near(sw, cw, i)})
+    for pa, la in ins_w:
+        if la >= HB_INSERT_LETTERS and any(abs(pa - pb) <= HB_TOLERANCE and lb >= HB_INSERT_LETTERS for pb, lb in ins_c):
+            i = owner_l[min(pa, len(owner_l) - 1)]
+            out.append({"kind": "something else heard", "word": owner_w[i],
+                        "whisper": _near(sw, ww, i), "ctc": _near(sw, cw, i)})
+    seen, uniq = set(), []                         # one flag per token
+    for f in out:
+        if f["word"] not in seen:
+            seen.add(f["word"]); uniq.append(f)
+    return uniq
+
+
+def sentence_at(words, i):
+    """The sentence (of the spoken tokens) holding token i."""
+    s = i
+    while s > 0 and not words[s - 1].endswith((".", "!", "?")):
+        s -= 1
+    e = i
+    while e < len(words) - 1 and not words[e].endswith((".", "!", "?")):
+        e += 1
+    return " ".join(words[s:e + 1])
+
+
+def _load_whisper():
+    import torch
+    from transformers import pipeline
+    return pipeline("automatic-speech-recognition", model=WHISPER_MODEL, torch_dtype=torch.float16, device="cuda")
+
+
+def _whisper_text(asr, audio16k):
+    return asr({"raw": audio16k, "sampling_rate": 16000}, chunk_length_s=30, batch_size=8,
+               generate_kwargs={"language": "en", "task": "transcribe"})["text"]
+
+
 def _align(model, processor, audio16k, words, emission=None):
     """CTC forced alignment of `words` (whitespace tokens) onto 16 kHz audio -> [(start, end)]."""
     import torch
@@ -241,7 +385,11 @@ class Drama3:
     def start(self):
         import requests
         log = open("/tmp/serve.log", "w")
-        self.srv = subprocess.Popen(["sgl-omni", "serve", "--model-path", "/vol/drama-3", "--port", "8000"],
+        # The engine's default share (0.70 of the card) + vocoder (0.10, can overrun) + preprocessing
+        # (6 GiB) left no room for the hear-back listeners (Whisper large-v3 + wav2vec2, ~6 GiB in this
+        # process): the first full batch with hear-back went CUDA OOM. 0.60 frees ~8 GiB.
+        self.srv = subprocess.Popen(["sgl-omni", "serve", "--model-path", "/vol/drama-3", "--port", "8000",
+                                     "--tts_engine.gpu_memory_fraction", ENGINE_MEM_FRACTION],
                                     stdout=log, stderr=subprocess.STDOUT)
         t0 = time.time()
         while True:
@@ -258,13 +406,15 @@ class Drama3:
         from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
         self.processor = Wav2Vec2Processor.from_pretrained(ALIGN_MODEL)
         self.aligner = Wav2Vec2ForCTC.from_pretrained(ALIGN_MODEL).to("cuda").eval().half()
+        self.whisper = _load_whisper()
         vol.commit()
         self.refs_written = False
         print(f"Drama 3 up in {time.time() - t0:.0f}s", flush=True)
 
     @modal.method()
     def voice(self, refs: list, items: list) -> list:
-        """refs: [(wav bytes, transcript)]; items: [(key, text)] -> [(key, mp3|None, words|None, error|None)]."""
+        """refs: [(wav bytes, transcript)]; items: [(key, text)]
+        -> [(key, mp3|None, words|None, error|None, hear-back flags)]."""
         import io, concurrent.futures as cf
         import numpy as np, requests, soundfile as sf, librosa
         if not self.refs_written:
@@ -280,7 +430,7 @@ class Drama3:
                               json={"input": chunk, "references": references})
             return job, r
 
-        audio = {}
+        audio, flags = {}, {}
         t0 = time.time()
         pending, takes = jobs, 0
         with cf.ThreadPoolExecutor(CONCURRENCY) as ex:
@@ -302,8 +452,15 @@ class Drama3:
                     a16 = librosa.resample(pcm, orig_sr=sr, target_sr=16000)
                     toks = spoken_text(chunk).split()
                     em = _emission(self.aligner, self.processor, a16)
-                    probs = check_clip(a16, toks, heard_text(self.processor, em))
-                    if probs and takes <= QA_RETRIES:
+                    ctc = heard_text(self.processor, em)
+                    probs = check_clip(a16, toks, ctc)
+                    misread = [] if probs else hearback(toks, _whisper_text(self.whisper, a16), ctc)
+                    if misread and takes <= QA_RETRIES:
+                        print(f"  hear-back take {takes} of {key}#{ci}: " + "; ".join(
+                            f"{m['kind']} at {toks[m['word']]!r} (whisper: {m['whisper']!r})" for m in misread)
+                              + " — re-voicing", flush=True)
+                        retry.append(job)
+                    elif probs and takes <= QA_RETRIES:
                         print(f"  QA take {takes} of {key}#{ci}: {'; '.join(probs)} — re-voicing", flush=True)
                         retry.append(job)
                     elif probs:
@@ -311,6 +468,9 @@ class Drama3:
                             f"failed clip QA on {takes} takes: {'; '.join(probs)} — {chunk[:60]!r}")
                     else:
                         audio[(key, ci)] = (pcm, sr, chunk, _align(self.aligner, self.processor, a16, toks, em))
+                        if misread:               # still misheard after every retake: ship it, flag it
+                            flags.setdefault(key, []).extend(dict(m, sentence=sentence_at(toks, m["word"]))
+                                                             for m in misread)
                 pending = retry
         print(f"voiced {len(jobs)} chunks in {time.time() - t0:.0f}s ({takes} round(s))", flush=True)
         out = []
@@ -318,7 +478,7 @@ class Drama3:
             parts = [audio[(k, ci)] for (k, ci, _) in jobs if k == key]
             err = next((p for p in parts if isinstance(p, Exception)), None)
             if err:
-                out.append((key, None, None, str(err))); continue
+                out.append((key, None, None, str(err), [])); continue
             sr = parts[0][1]
             gap = np.zeros(int(GAP_SECONDS * sr), dtype=np.float32)
             pcm, words, offset = [], [], 0.0
@@ -333,7 +493,7 @@ class Drama3:
             mp3 = subprocess.run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-ar", "44100", "-ac", "1",
                                   "-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", "pipe:1"],
                                  input=wav.getvalue(), capture_output=True, check=True).stdout
-            out.append((key, mp3, words, None))
+            out.append((key, mp3, words, None, flags.get(key, [])))
         return out
 
 
@@ -387,10 +547,21 @@ class Session:
     def synthesize(self, items):
         """items: [(key, text)] -> ({key: (mp3 bytes, words)}, {key: error})."""
         t0 = time.time()
-        res = self._d.voice.remote(self._refs, list(items))
+        # spawn + short polls, not .remote(): a .remote() call left pending past ~2-3 min (the
+        # container start alone is ~3 min) can die client-side with "Deadline exceeded".
+        call = self._d.voice.spawn(self._refs, list(items))
+        while True:
+            try:
+                res = call.get(timeout=10)
+                break
+            except TimeoutError:
+                continue
         print(f"  [drama3] {len(res)} clip(s) in {time.time() - t0:.0f}s (incl. any container start)")
         out, errs = {}, {}
-        for key, mp3, words, err in res:
+        self.flags = {}                    # {key: [hear-back flags]} — misreads that survived the retakes
+        for key, mp3, words, err, flags in res:
+            if flags:
+                self.flags[key] = flags
             if err:
                 errs[key] = err
             else:

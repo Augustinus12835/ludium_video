@@ -27,17 +27,22 @@ compaction):
   - phrases: ≤ ≥ ± √ (all modes); ≠ ∞ (math mode).
   - math mode: Greek names -> symbols ("delta X"/"delta-X" -> ΔX, "lambda two"
     -> λ₂), differentials ("d y over d x" -> dy/dx, "d squared y" -> d²y,
-    "partial f" -> ∂f), letter subscripts ("X-zero" -> X₀,
-    "epsilon-naught"/"v naught" -> ε₀/v₀), "squared"/"cubed"
+    "partial f" -> ∂f), letter subscripts ("X-zero"/"X zero" -> X₀, "v one" -> v₁,
+    "epsilon-naught"/"v naught" -> ε₀/v₀), hats ("i-hat"/"i hat" -> î), "squared"/"cubed"
     -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/".
   - pronunciation aliases back to the written form (scripts/utils/tts_aliases.py): every
     mode — "Oiler" -> Euler, "Tessaly" -> Thessaly, "cap-M" -> CAPM; math mode also —
-    "sinch" -> sinh, "mew-hat" -> μ̂, "vee" -> V.
+    "sinch" -> sinh, "mew hat"/"mew-hat" -> μ̂, "vee" -> V.
   - era letters after a number/century: "B C" -> BC, "A D" -> AD; and "A D"
     BEFORE a year, the usual English order ("A D eighty-six" -> AD 86) — only
     outside math mode, and only when a digit year follows directly.
 
+Older narration hyphen-bound notation ("delta-X", "v-one", "i-hat"); it is spaced now ("delta X",
+"v one", "i hat") because some voices read an in-token hyphen aloud. Both forms compact the same
+way, so captions of older videos do not change.
+
 CLI smoke test:  python -m scripts.utils.subtitle_compact "text ..." [--math]
+Self-test:       python -m scripts.utils.subtitle_compact --self-test
 """
 
 import sys
@@ -591,9 +596,8 @@ _HAT_PRECOMPOSED = {'i': 'î', 'j': 'ĵ'}     # dotted letters need the precompo
 _COMBINING_CIRCUMFLEX = '\u0302'
 
 # Spoken letter pairs that are a conventional lowercase PRODUCT, not a subscript. Only these are
-# rewritten: every other "X-Y" pair in the corpus is a subscript, which the TTS rules deliberately
-# hyphen-bind ("A_x" -> "A-X"), and joining those would assert a product that isn't there.
-# Corpus: M-G 105, M-V 8, M-A 2.
+# rewritten: every other "X-Y" / "X Y" pair in the corpus is a subscript ("A_x" -> "A X"), and
+# joining those would assert a product that isn't there. Corpus: M-G 105, M-V 8, M-A 2.
 _CONVENTIONAL_PRODUCTS = {('M', 'G'): 'mg', ('M', 'V'): 'mv', ('M', 'A'): 'ma'}
 
 _TRIG_NAMES = {'sine': 'sin', 'cosine': 'cos', 'tangent': 'tan', 'secant': 'sec'}
@@ -633,6 +637,21 @@ def _pass_space_powers(toks: List[_Tok], letters: frozenset) -> None:
             continue
         t.core = parts[0] + ''.join(_SUP_MAP[c] for c in str(val * mult))
         t.mathy = True
+    # spaced form ("R two", "F N", "R 5,000" — the number pass has already joined "five
+    # thousand"); not inside a spelled initialism (prev is a bare letter)
+    i = 0
+    while i < len(toks) - 1:
+        t, nxt = toks[i], toks[i + 1]
+        if t.core in letters and not t.mathy and not t.trail and not nxt.lead and \
+                not (i > 0 and _is_single_letter(toks[i - 1].core) and not toks[i - 1].trail):
+            low = nxt.core.lower()
+            if low in _SUP_LETTERS:
+                _merge(toks, i, i + 2, t.core + _SUP_LETTERS[low])
+            elif low in _UNITS:
+                _merge(toks, i, i + 2, t.core + _SUP_MAP[str(_UNITS[low])])
+            elif nxt.core.replace(',', '').isdigit():
+                _merge(toks, i, i + 2, t.core + ''.join(_SUP_MAP[c] for c in nxt.core.replace(',', '')))
+        i += 1
 
 
 def _pass_letter_size(toks: List[_Tok]) -> None:
@@ -665,6 +684,8 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
                 t.core, t.mathy = sym + b, True
             elif b.lower() in _SUB_WORDS:
                 t.core, t.mathy = sym + _SUB_DIGITS[_SUB_WORDS[b.lower()]], True
+            elif b.lower() == 'hat':
+                t.core, t.mathy = sym + _COMBINING_CIRCUMFLEX, True
         elif _is_single_letter(a) and b.lower() in _SUB_WORDS:
             t.core, t.mathy = a + _SUB_DIGITS[_SUB_WORDS[b.lower()]], True
         elif _is_single_letter(a) and b.lower() == 'hat':
@@ -690,19 +711,37 @@ def _pass_math_tokens(toks: List[_Tok]) -> None:
                 _merge(toks, i, i + 2,
                        sym + _SUB_DIGITS[_SUB_WORDS[nxt.core.lower()]])
                 continue
+            if nxt.core.lower() == 'hat':          # "mew hat" -> μ̂, "theta hat" -> θ̂
+                _merge(toks, i, i + 2, sym + _COMBINING_CIRCUMFLEX)
+                continue
         # any-case letter + "naught": "v naught" -> v₀ (a lowercase letter + digit word stays
         # prose — "a one" — but "naught" after a letter is always a subscript)
         if _is_single_letter(t.core) and nxt.core.lower() == 'naught' and not t.mathy:
             _merge(toks, i, i + 2, t.core + '₀')
             continue
-        # UPPERCASE letter + digit word: "V one" -> V₁ — but not inside a
-        # spelled initialism ("S H A two fifty six": prev is a bare letter)
-        if _is_single_letter(t.core) and t.core.isupper() and \
-                nxt.core.lower() in _UNITS and not t.mathy and \
-                not (i > 0 and _is_single_letter(toks[i - 1].core)
-                     and not toks[i - 1].trail):
-            _merge(toks, i, i + 2,
-                   t.core + _SUB_DIGITS[_UNITS[nxt.core.lower()]])
+        in_initialism = i > 0 and _is_single_letter(toks[i - 1].core) and not toks[i - 1].trail
+        # letter + digit word: "V one" -> V₁, "v one" -> v₁ — but not inside a spelled initialism
+        # ("S H A two fifty six": prev is a bare letter), and never a lowercase "a" ("a one" is
+        # the article; the variable is spoken "A one")
+        if _is_single_letter(t.core) and t.core != 'a' and \
+                nxt.core.lower() in _UNITS and not t.mathy and not in_initialism:
+            # a double index spoken on ("r one two" -> r₁₂, the distance from 1 to 2)
+            j = i + 2
+            while j < len(toks) and j - i < 4 and not toks[j - 1].trail and not toks[j].lead \
+                    and toks[j].core.lower() in _UNITS:
+                j += 1
+            _merge(toks, i, j, t.core + ''.join(_SUB_DIGITS[_UNITS[toks[k].core.lower()]]
+                                                for k in range(i + 1, j)))
+            continue
+        # letter + "hat": "i hat" -> î, "X hat" -> X̂ (never "a hat")
+        if _is_single_letter(t.core) and t.core != 'a' and nxt.core.lower() == 'hat' \
+                and not t.mathy and not in_initialism:
+            _merge(toks, i, i + 2, _hat_form(t.core))
+            continue
+        # conventional products spoken spaced: "M G" -> mg (not inside an initialism)
+        if (t.core, nxt.core) in _CONVENTIONAL_PRODUCTS and not t.mathy and not in_initialism \
+                and not (i + 2 < len(toks) and _is_single_letter(toks[i + 2].core)):
+            _merge(toks, i, i + 2, _CONVENTIONAL_PRODUCTS[(t.core, nxt.core)])
             continue
         # differentials: "d x" -> dx, "d T" -> dT, "d squared y" -> d²y,
         # "d theta" -> dθ
@@ -1111,7 +1150,41 @@ def compact_stats(before: List[Dict], after: List[Dict]) -> str:
             f"{changed} spoken tokens compacted")
 
 
+_SELF_TESTS = [
+    # (spoken, math_mode, space_letters, expected display) — hyphen (legacy) and spaced forms
+    ('so delta-X over delta-T', True, '', 'so ΔX/ΔT'),
+    ('so delta X over delta T', True, '', 'so ΔX/ΔT'),
+    ('lambda-one and lambda one', True, '', 'λ₁ and λ₁'),
+    ('take v-one and v one and M two', True, '', 'take v₁ and v₁ and M₂'),
+    ('X-zero and X zero and v naught', True, '', 'X₀ and X₀ and v₀'),
+    ('the unit vector i-hat and j hat and r hat', True, '', 'the unit vector î and ĵ and r̂'),
+    ('the weight M-G and M G', True, '', 'the weight mg and mg'),
+    ('a one-dimensional space and a hat', True, '', 'a one-dimensional space and a hat'),
+    ('S H A two fifty six', True, '', 'S H A two fifty six'),
+    ('x one hundred', True, '', 'x 100'),
+    ('in R-two and R two and F-N and F N and C-four', True, 'RCF', 'in R² and R² and Fⁿ and Fⁿ and C⁴'),
+    ('C one is a constant', True, '', 'C₁ is a constant'),
+    ('mew-hat and mew hat and theta hat, mew one, kai squared', True, '', 'μ̂ and μ̂ and θ̂, μ₁, χ²'),
+    ('divided by r one two squared, m one m two', True, '', 'divided by r₁₂², m₁ m₂'),
+]
+
+
+def _self_test() -> int:
+    bad = 0
+    for spoken, math, letters, want in _SELF_TESTS:
+        ws = [{'word': w, 'start': float(i), 'end': i + 0.5} for i, w in enumerate(spoken.split())]
+        got = ' '.join(w['word'] for w in compact_words(ws, math_mode=math,
+                                                        space_letters=frozenset(letters)))
+        if got != want:
+            bad += 1
+            print(f"FAIL {spoken!r}: got {got!r}, want {want!r}")
+    print(f"{len(_SELF_TESTS) - bad}/{len(_SELF_TESTS)} subtitle_compact self-tests passed")
+    return 1 if bad else 0
+
+
 if __name__ == '__main__':
+    if '--self-test' in sys.argv:
+        sys.exit(_self_test())
     args = [a for a in sys.argv[1:] if a != '--math']
     math = '--math' in sys.argv
     text = ' '.join(args) or sys.stdin.read()
