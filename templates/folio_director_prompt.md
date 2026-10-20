@@ -93,7 +93,7 @@ of the caption, which is already on screen. Reach for:
 | the narration… | the composition |
 |---|---|
 | introduces a person who matters | a portrait **card** (engraved bust, name, dates or ≤5-word title) arriving on the name; re-use the same card later, re-arranged (row → column → lineage) |
-| moves to a place the viewer can't locate | a grounded **map** plate with a pin / route drawing on the words |
+| moves to a place the viewer can't locate | a **map** (a data map: exact geography) with a pin / route drawing on the words |
 | gives numbers (counts, sizes, losses, survivals) | a **tally** unit chart, a big numeral, a ledger that grows row by row |
 | contrasts two things / ranks / prefers | a two-column **ledger** (X over Y), losers struck through in crimson |
 | lists items | a roman-numeral **list** that builds line by line |
@@ -123,18 +123,33 @@ scenes, 6–10 images per minute overall** (a 20-minute video ≈ 120–200 asse
 - `object` — one isolated object on open paper; becomes an ink cutout (transparent paper)
   that can float over plates or paper. Books, rolls, masks, vases, weapons, coins, ships,
   tools, a single building elevation.
-- `map` — grounded on Gemini 3 Pro + Google Search: `places` = the ONLY names it letters
-  (≤ 8, real spellings). One map per region per video, re-used with different pins/routes.
-  A map inherited from an earlier episode may be re-prompted (new `places`, wider region):
-  give it a NEW id (`med_map_e02`) rather than editing a `shared` asset.
-  An UNLETTERED map (no `places`) that must carry no writing at all may set `"redraw": true`:
-  the grounded map is redrawn on gpt-image with no lettering (the geography is traced) and the
-  scene puts the names on as timed overlays. Use it when the grounded map keeps lettering names.
+- `map` — **a data map by default: give a lon/lat window, not a prompt.**
+  `{"id": "asia_sea", "kind": "map", "bbox": [west, east, north, south], "pins": {"Goa": [73.83, 15.50], …}}`
+  is rendered from real elevation data (Natural Earth shaded relief for wide windows, AWS terrain
+  tiles down to a single bay or battlefield) in the house engraved look, for $0, with the true
+  coastlines — a generated map once put Japan where the Philippines are. The window is grown to
+  16:9 about its centre; `pins` lists every place the scenes will point at (decimal degrees, east
+  and north positive), and `folio.py assets` writes their exact overlay positions to
+  `<id>.geo.json`. Frame the window so the places the narration names sit inside it with room
+  around them (in presenter videos, out of the top-right window; the audit warns). The map carries
+  no writing: the scenes set every name as a `Pin`/`Tag` overlay, timed to the words. One map per
+  region per video, re-used with different pins/routes.
+  **A prompted map** (grounded Gemini 3 Pro + Google Search; `places` = the ONLY names it letters,
+  ≤ 8, real spellings) only when real data cannot show it: a coastline that has moved since the
+  period AND the story turns on it — Lade island off Miletus, the narrow pass at Thermopylae, a
+  silted harbour (the data shows today's coast) — or a region beyond ~60° latitude (Mercator
+  stretches it). Say in the prompt how the period coast differed. A map inherited from an earlier
+  episode may be re-prompted: give it a NEW id (`med_map_e02`) rather than editing a `shared`
+  asset. An UNLETTERED prompted map (no `places`) that must carry no writing at all may set
+  `"redraw": true`: the grounded map is redrawn on gpt-image with no lettering (the geography is
+  traced) and the scene puts the names on as timed overlays.
 - **then-state** — any asset with `"of": "<base id>"` is re-drawn from the base image with
   only the change you describe ("the same temple, now roofless and burnt"; "the same roll,
   now torn to three scraps"). Same framing, so it cross-dissolves in place.
 
-Asset fields: `{id, kind, prompt, cast?: [cast ids in the picture], of?, places? (maps),
+Asset fields: `{id, kind, prompt, cast?: [cast ids in the picture], of?, bbox? + pins? (data maps:
+[W, E, N, S] and {name: [lon, lat]}; no prompt; `source: "ne" | "terrain"` and `projection: "plate"`
+override the defaults only when asked), places? (prompted maps),
 trim?: [left, top, right, bottom] (fractions of the raw image to cut — QA's fix for a plate the
 model drew with a wide paper margin),
 canvas?: "2k" | "1080" (overrides the episode's 4K for one plate — rarely needed),
@@ -180,7 +195,7 @@ Prompt rules (the model sees the house style clause + `world` + cast looks + you
     {"id": "aeschylus", "kind": "portrait", "cast": ["aeschylus"], "shared": true, "prompt": "…"},
     {"id": "papyrus_roll", "kind": "object", "prompt": "…"},
     {"id": "papyrus_torn", "of": "papyrus_roll", "prompt": "the same papyrus now survives only as …"},
-    {"id": "aegean", "kind": "map", "places": ["Athens", "Sparta", "Corinth"], "prompt": "…"}
+    {"id": "aegean", "kind": "map", "bbox": [21.0, 28.5, 40.0, 36.0], "pins": {"Athens": [23.73, 37.98], "Sparta": [22.43, 37.07], "Miletus": [27.28, 37.53]}}
   ],
   "scenes": [
     {"index": 0, "anchor": "<opening words>", "plate": "I", "brief": "Full-bleed `florence_library`; on 'a Greek book' wash it and draw on `codex` centre-right …"},

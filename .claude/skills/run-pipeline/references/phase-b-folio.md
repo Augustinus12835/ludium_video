@@ -17,9 +17,9 @@ render · compile · sheet · contact · status), `scripts/build_narration_timel
 **Paid services beyond ElevenLabs.** Images: OpenAI `gpt-image` for plates, portraits, objects
 and then-states (`OPENAI_API_KEY`; gpt-image-2.5, API id `gpt-image-2.5-sunburst`, is required —
 there is no fallback model, because a plate drawn by another model drifts from the house style)
-and Gemini 3 Pro Image with Google Search grounding for maps (`GOOGLE_CLOUD_API_KEY`). Budget
-roughly US$10–12 of images per 20-minute episode (≈120–200 assets: 4K plates ≈$0.10,
-portraits/objects ≈$0.04, 4K maps ≈$0.24).
+and, only for the rare prompted map, Gemini 3 Pro Image with Google Search grounding
+(`GOOGLE_CLOUD_API_KEY`). Budget roughly US$10–12 of images per 20-minute episode (≈120–200
+assets: 4K plates ≈$0.10, portraits/objects ≈$0.04, data maps $0, prompted 4K maps ≈$0.24).
 
 **Setup once:** Node.js 18+, then `cd remotion && npm ci`.
 
@@ -126,9 +126,24 @@ by the folder prefix before the first `_` — the SAME portrait image in every e
 ```bash
 venv/bin/python scripts/folio.py assets pipeline/<L>/Video-N --jobs 12
 ```
+**Maps come from real data.** A map with `"bbox": [W, E, N, S]` (+ `"pins"`) is a *data map*:
+`scripts/geo_map.py` renders it in the house engraved look (relief-shaded land, ruled sea with a
+coastal halo, ink coastline) from public data — Natural Earth's 21600×10800 shaded relief with
+lakes and drainages for windows ≥ 43° of longitude, otherwise AWS Terrain Tiles (SRTM-based, no
+key) at the zoom that gives 4K native detail, down to a battlefield, with Natural Earth lakes and
+rivers (rivers on windows ≥ 3°; modern reservoirs and canals left out). Mercator, 5–60 s, $0,
+cached by key; the data (~250 MB) downloads on first use into `inputs/maps/`. `<id>.geo.json`
+holds the fitted bbox and every pin in the 1920×1080 overlay space, and `folio.py pins <video>
+<map> [Name=lon,lat …]` prints positions for any place. Why: a grounded map of ours put Japan
+where the Philippines are — its prompt asked for Japan "just below the middle" on a map that also
+had to reach Malacca, which real geography can't do. **Prompted maps (grounded Gemini Pro) are
+the rare fallback:** a coastline that has moved since the period and matters (Lade island at
+Miletus, Thermopylae, silted harbours — the data shows today's coast), or a window beyond ~60°
+latitude. `audit` errors on a pin off the map and warns on one under the presenter's window or a
+far-north window.
 **Big canvases + camera.** `folio.json` carries `"canvas": "4k"` (the director writes it;
 `folio.py audit` warns when it is missing): every plate is generated at 3840×2160 on
-gpt-image-2.5 and every grounded map at Gemini Pro imageSize 4K, then kept at 3840×2160
+gpt-image-2.5 (data maps render at 3840×2160; prompted maps at Gemini Pro imageSize 4K), then kept at 3840×2160
 (then-states inherit their base's canvas). `<Plate camera={[…]}>` then tours the picture — a
 building part by part, shot / reverse-shot between two speakers, a reveal, a tableau read
 figure by figure — instead of labels and leader lines (scene prompt "the camera"). Detail
@@ -146,7 +161,7 @@ Every image is normalised to the house duotone; plates/maps are trimmed of plate
 become RGBA ink cutouts (a then-state shares its base's crop). Post-processing changes never
 need new API calls: `folio.py refinish`. OpenAI rate-limits images per minute by account tier
 and a call takes ~35–45 s; at 20 images/min `--jobs 12` runs at the ceiling (429s back off
-automatically) — lower `--jobs` on a lower tier. Maps stay on grounded Gemini Pro. When forcing
+automatically) — lower `--jobs` on a lower tier. Prompted maps stay on grounded Gemini Pro; data maps call no model. When forcing
 a full regeneration, generate in dependency order: portraits, then bases, then then-states
 (`--only` lists).
 
@@ -170,8 +185,9 @@ editing the asset's `prompt` (positive wording — a negative paints its token) 
 **Stubborn assets:** reroll with a corrected prompt (`--only <id> --force`); plates, portraits
 and objects always stay on gpt-image-2.5. A plate drawn with a paper frame retries once
 automatically with a full-bleed nudge. Image EDITS (`of` then-states) cannot reliably remove a figure or change a
-count — for those, drop `of` and generate a fresh image. Maps are grounded Gemini Pro; fix
-their `places`/prompt instead. **Map redraw (opt-in):** grounded Gemini can keep lettering place
+count — for those, drop `of` and generate a fresh image. A data map is exact — re-frame its
+`bbox` if the framing is wrong; a prompted map is grounded Gemini Pro — fix its `places`/prompt,
+or make it a data map. **Map redraw (opt-in):** grounded Gemini can keep lettering place
 names on a map meant to be unlettered. `"redraw": true` on that map (or `"map_redraw": true` in
 folio.json for every unlettered map) adds a second pass: the grounded map is redrawn on
 gpt-image-2.5 with no writing, geography traced from it; the original stays at

@@ -128,8 +128,14 @@ Clips regenerate only when their narration or direction changes.
 | Need | For |
 |---|---|
 | `OPENAI_API_KEY` | plates, portraits, objects (`gpt-image-2.5-sunburst`, no fallback) |
-| `GOOGLE_CLOUD_API_KEY` | grounded maps (Gemini); optional motion plates (Gemini Omni Flash) |
+| `GOOGLE_CLOUD_API_KEY` | optional: prompted maps (grounded Gemini; data maps need no key); motion plates (Gemini Omni Flash) |
 | Node.js 18+, `cd remotion && npm ci` | rendering with [Remotion](https://www.remotion.dev) |
+
+Maps are free and geographically exact: `scripts/geo_map.py` renders them from
+[Natural Earth](https://www.naturalearthdata.com) (public domain) and
+[AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (mostly public-domain SRTM/GMTED/ETOPO;
+a few regional sources ask for a credit line — e.g. EU-DEM in Europe: see the
+[tile attribution notes](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)).
 
 Images cost ~US$10–12 per 20-minute episode. Motion plates (`scripts/folio_motion.py`) are off by
 default (~US$1.10 per 10 s). To split a book into episodes, write a manifest like

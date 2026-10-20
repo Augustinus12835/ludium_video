@@ -7,12 +7,14 @@ TTS → word timeline), then:
 
   folio.json (director subagent)  → scenes laid over the narration by verbatim
                                     anchors + the asset list (engraved plates,
-                                    portraits, isolated objects, grounded maps,
+                                    portraits, isolated objects, maps (data
+                                    maps from a lon/lat bbox, or grounded ones),
                                     and "then"-states of the same composition)
   folio.py place                  → anchors → frame-exact scene spans
   folio.py assets                 → generated images (OpenAI gpt-image; grounded
                                     maps on Gemini), normalised to one sepia
-                                    duotone; objects become ink cutouts (RGBA)
+                                    duotone; objects become ink cutouts (RGBA);
+                                    bbox maps rendered free by scripts/geo_map.py
   frames/scene_NN.tsx (scene authors, after LOOKING at the assets)
   folio.py still --auto           → look-fix-look stills at every cue
   folio.py lint                   → cues resolve, assets exist, house rules
@@ -35,6 +37,7 @@ Usage:
     folio.py audit   pipeline/<L>/Video-1            (director gate on folio.json)
     folio.py prompt  direct|scenes pipeline/<L>/Video-1 [--scenes 0-12] [--out F]
     folio.py grid    pipeline/<L>/Video-1 <asset>    (coordinate grid for overlays)
+    folio.py pins    pipeline/<L>/Video-1 <map> [Name=lon,lat …]   (exact positions on a bbox map)
     folio.py refinish pipeline/<L>/Video-1           (re-post-process raw images, no API)
     folio.py status  pipeline/<L>/Video-1
 """
@@ -745,6 +748,38 @@ def asset_canvas(folio: dict, a: dict):
     return c if c in CANVAS else None
 
 
+def geo_key(folio: dict, a: dict) -> str:
+    """Cache key of a data map (a map with "bbox"): rendered by scripts/geo_map.py, no image model."""
+    from scripts import geo_map
+    return json.dumps({"bbox": a["bbox"], "pins": a.get("pins", {}), "source": a.get("source", "auto"),
+                       "projection": a.get("projection", "mercator"), "canvas": asset_canvas(folio, a),
+                       "v": geo_map.RENDER_VERSION}, sort_keys=True)
+
+
+def render_geo(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
+    """Data map: `"bbox": [W, E, N, S]` → Natural Earth / AWS terrain render at the episode canvas,
+    $0, geographically exact. Writes <id>.geo.json (fitted bbox, pins in the 1920×1080 overlay space)."""
+    from scripts import geo_map
+    out = asset_file(vd, folio, a)
+    keyf = out.with_suffix(out.suffix + ".key")
+    key = geo_key(folio, a)
+    if out.exists() and keyf.exists() and keyf.read_text() == key and not force:
+        return a["id"], "cached"
+    t0 = time.time()
+    try:
+        geo = geo_map.render(a["bbox"], out, a.get("source", "auto"), a.get("projection", "mercator"),
+                             size=CANVAS.get(asset_canvas(folio, a), (1920, 1080)), pins=a.get("pins"))
+    except Exception as e:  # noqa: BLE001
+        return a["id"], f"FAIL geo map {e}"
+    raw_dir = vd / ASSET_DIR / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    Image.open(out).save(raw_dir / f"{a['id']}.png")   # a then-state's reference
+    (vd / ASSET_DIR / f"{a['id']}.crop.json").write_text(json.dumps([0, 0, *Image.open(out).size]))
+    keyf.write_text(key)
+    warn = "; ".join(geo_map.pin_warnings(geo, presenter=bool(folio.get("presenter"))))
+    return a["id"], f"ok geo map {geo['source']} {time.time() - t0:.0f}s ($0)" + (f"  ⚠ {warn}" if warn else "")
+
+
 def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
     kind = asset_kind(folio, a)
     out = asset_file(vd, folio, a)
@@ -774,6 +809,8 @@ def gen_one(vd: Path, folio: dict, a: dict, force: bool) -> tuple:
                               for r, cid in zip(refs[n_of:], sided)]
     if a.get("from"):
         return import_one(vd, folio, a, force)
+    if kind == "map" and a.get("bbox"):
+        return render_geo(vd, folio, a, force)
     prompt = build_prompt(a, folio, kind)
     tier = asset_tier(a, kind)
     model = TIERS[tier]
@@ -913,6 +950,34 @@ def cmd_refinish(a) -> int:
     return 0
 
 
+def cmd_pins(a) -> int:
+    """Exact overlay positions on a data map (bbox): the asset's own `pins` plus any Name=lon,lat
+    given here, in the 1920×1080 Plate-children space — no reading a grid by eye."""
+    from scripts import geo_map
+    vd = vdir(a.video)
+    folio = load_folio(vd)
+    x = next((y for y in folio["assets"] if y["id"] == a.asset), None)
+    if x is None:
+        sys.exit(f"unknown asset {a.asset}")
+    gf = asset_file(vd, folio, x).with_suffix(".geo.json")
+    if gf.exists():
+        geo = json.loads(gf.read_text())
+    elif x.get("bbox"):
+        proj = x.get("projection", "mercator")
+        geo = {"bbox": geo_map.fit_bbox(x["bbox"], proj), "projection": proj}
+    else:
+        sys.exit(f"{a.asset} is not a data map (no bbox, no {gf.name}) — read positions off `folio.py grid`")
+    places = dict(x.get("pins") or {})
+    places.update(geo_map.parse_places(a.places))
+    geo["pins"] = {k: geo_map.to_px(v[0], v[1], geo["bbox"], geo.get("projection", "mercator")) for k, v in places.items()}
+    print(f"{a.asset}: bbox {geo['bbox']} ({geo.get('projection', 'mercator')})")
+    for k, v in geo["pins"].items():
+        print(f"  {k}: {v}")
+    for wmsg in geo_map.pin_warnings(geo, presenter=bool(folio.get("presenter"))):
+        print(f"  ⚠ {wmsg}")
+    return 0
+
+
 def cmd_grid(a) -> int:
     """Asset with a labelled pixel grid (every 100 px) → folio_build/grid_<id>.png, for
     reading overlay coordinates off a plate/map (image space = Plate children space)."""
@@ -965,8 +1030,20 @@ def cmd_audit(a) -> int:
         errs.append("duplicate asset ids")
     idset = set(ids)
     for x in assets:
-        if not x.get("prompt") and not x.get("from"):
-            errs.append(f"asset {x.get('id')}: no prompt")
+        if not x.get("prompt") and not x.get("from") and not x.get("bbox"):
+            errs.append(f"asset {x.get('id')}: no prompt" + (" (a map: give it a \"bbox\")" if x.get("kind") == "map" else ""))
+        if x.get("bbox"):
+            from scripts import geo_map
+            try:
+                proj = x.get("projection", "mercator")
+                fb = geo_map.fit_bbox(x["bbox"], proj)
+                geo = {"bbox": fb, "pins": {k: geo_map.to_px(v[0], v[1], fb, proj) for k, v in (x.get("pins") or {}).items()}}
+                for wmsg in geo_map.pin_warnings(geo, presenter=bool(f.get("presenter"))):
+                    (errs if "off the map" in wmsg else warns).append(f"asset {x['id']}: {wmsg}")
+            except (ValueError, TypeError, IndexError) as e:
+                errs.append(f"asset {x['id']}: bad bbox — {e}")
+            if x.get("prompt") or x.get("places"):
+                warns.append(f"asset {x['id']}: has a bbox, so its prompt/places are ignored (data map)")
         if x.get("of") and x["of"] not in idset:
             errs.append(f"asset {x['id']}: base '{x['of']}' not declared")
         k = asset_kind(f, x) if x.get("id") else "?"
@@ -1789,6 +1866,10 @@ def main() -> int:
     s = sub.add_parser("grid")
     s.add_argument("video")
     s.add_argument("asset")
+    s = sub.add_parser("pins", help="exact overlay positions on a data map (bbox)")
+    s.add_argument("video")
+    s.add_argument("asset")
+    s.add_argument("places", nargs="*", help="Name=lon,lat")
     s = sub.add_parser("still")
     s.add_argument("video")
     s.add_argument("--scene", required=True, help="scene index or comma list")
@@ -1803,7 +1884,7 @@ def main() -> int:
     a = ap.parse_args()
     return {"place": cmd_place, "assets": cmd_assets, "lint": cmd_lint, "still": cmd_still, "render": cmd_render,
             "compile": cmd_compile, "sheet": cmd_sheet, "status": cmd_status, "refinish": cmd_refinish,
-            "grid": cmd_grid, "audit": cmd_audit, "prompt": cmd_prompt, "contact": cmd_contact}[a.cmd](a)
+            "grid": cmd_grid, "pins": cmd_pins, "audit": cmd_audit, "prompt": cmd_prompt, "contact": cmd_contact}[a.cmd](a)
 
 
 if __name__ == "__main__":

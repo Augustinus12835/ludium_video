@@ -147,7 +147,9 @@ Narration-first documentary with a Remotion "book of plates" visual track. Playb
 - **Visual track (after TTS):** `build_narration_timeline.py` → a director subagent writes
   `folio.json` (world, cast, 3–5 scenes/min on verbatim anchors, 6–10 generated assets/min,
   an `off_screen` list, `"canvas": "4k"`) → `folio.py place` / `audit` → `folio.py assets` (gpt-image-2.5, required;
-  maps on grounded Gemini Pro; every image normalised to one sepia duotone, objects become ink
+  maps from real elevation data by `scripts/geo_map.py` ($0; `"bbox"` + `"pins"`, exact overlay
+  positions from `folio.py pins`; grounded Gemini Pro only for a moved period coastline or far-north
+  windows); every image normalised to one sepia duotone, objects become ink
   cutouts) → scene-author subagents write free-form `frames/scene_NN.tsx` against
   `remotion/src/folio.tsx` after LOOKING at the assets, iterating on `folio.py still --auto` →
   `folio.py lint` / `render` / `sheet` / `compile` → `generate_subtitles.py`. Captions are
@@ -462,7 +464,8 @@ fallback transcription — compile and subtitle must run serially.
 | `preflight_manim.py` / `lint_manim_t2c.py` | Manim authoring preflight + t2c lint helpers |
 | `compile_video.py` | Compile frames + audio into final_video.mp4 |
 | `build_narration_timeline.py` | Folio: stack per-frame word timestamps into one narration timeline |
-| `folio.py` | Folio: place · audit · assets · refinish · grid · contact · prompt · still · lint · render · sheet · compile · status |
+| `folio.py` | Folio: place · audit · assets · refinish · grid · pins · contact · prompt · still · lint · render · sheet · compile · status |
+| `geo_map.py` | Data maps for folio: lon/lat bbox → engraved map from Natural Earth / AWS terrain tiles ($0) + exact pin positions (`render` · `pins`) |
 | `folio_motion.py` | Folio motion plates (optional): Three.js proxy → Gemini Omni Flash clip → `<Motion>` (cues · proxy · ref · gen · extend · fit · sheet; kit `scripts/motion_proxy/`) |
 | `presenter.py` | Optional on-screen presenter: setup · enable · prompt · plan · generate · hands · reset · zones (overlay runs inside compile) |
 | `longcat_avatar_modal.py` | LongCat-Video-Avatar 1.5 on Modal — the presenter hook (720p H200; 480p H100 for an opt-in LongCat wipe), per-segment prompts; `download` once |

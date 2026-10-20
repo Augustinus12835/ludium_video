@@ -18,7 +18,10 @@ the word-synchronous captions, and the dissolve into/out of your scene. **Never 
    `folio_build/grid_<id>.png` — a 100 px grid in the image's own 1920×1080 space (plates are
    4K files, but every coordinate — overlays and camera stops alike — is in this 1920×1080
    space). Read the real coordinates of what you will point at or frame; never guess where
-   Athens is on a map.
+   Athens is on a map. **A data map** (its folio.json entry has a `bbox`) gives exact positions
+   instead: `venv/bin/python scripts/folio.py pins <video> <map_id> [Name=lon,lat …]` prints every
+   pin in the folio.json entry plus any you add — use those numbers for `Pin`s, `Tag` leaders and
+   route waypoints (sea routes: add waypoints off the coasts the same way).
 2. **Write the scene** (`frames/scene_NN.tsx`).
 3. **Look at it**: `venv/bin/python scripts/folio.py still <video> --scene NN --auto` renders
    a still ~1 s after every cue plus the last frame → `folio_build/stills/`. Read every still.
@@ -156,7 +159,9 @@ Every component takes `at` (cue or seconds) and most take `until` (exit).
 - `<Ride src points w at? dur? until? turn?>` — an object cutout travelling a route; give it
   the SAME `points`/`at`/`dur` as its `<Draw>` and it rides the drawing tip (`turn` heads it
   along the route). `routePoint(points, p)` → `{x, y, angle}` for your own riders.
-- `<Pin x y at? label? side?>` — map pin with one ring pulse and an optional tag.
+- `<Pin x y at? label? side?>` — map pin with one ring pulse and an optional tag. A data map carries
+  no names: every place the viewer must find gets a `Pin` with `label` (or a `Tag`), timed to the words
+  that name it, at the position `folio.py pins` prints.
 - `<Tag text x y to? at?>` — cream label, optional leader line to a point `[x, y]`.
 - `<Type text x y at? cps? size?>` — typewriter text. `<Splat x y at? size? seed?>` — ink
   splatter (≤ 1 per video). `<Rule y w? at? color?>` — hairline drawn from the centre.
