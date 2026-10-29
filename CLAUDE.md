@@ -158,7 +158,8 @@ Narration-first documentary with a Remotion "book of plates" visual track. Playb
   3840×2160, and `<Plate camera={[{at, on, zoom, dur}]}>` travels the picture to whatever the
   narration names (a building part by part, speaker ↔ listener cuts, reveals) instead of
   labelling it. Coordinates stay in 1920×1080 image space; `folio.py lint` warns when a zoom
-  exceeds what the canvas holds.
+  exceeds what the canvas holds, and errors on a camera stop that cuts the framed subject's
+  face (YuNet face boxes, `scripts/utils/plate_faces.py`).
 - **Motion plates (optional, off by default):** a WIDE scene with generic, continuous motion
   (armies, fleets, crowds, work seen from afar, a camera move through a place — never
   close-ups or choreographed action) can become a moving engraved plate: a Three.js proxy

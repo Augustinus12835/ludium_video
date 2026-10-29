@@ -18,7 +18,8 @@ the word-synchronous captions, and the dissolve into/out of your scene. **Never 
    `folio_build/grid_<id>.png` — a 100 px grid in the image's own 1920×1080 space (plates are
    4K files, but every coordinate — overlays and camera stops alike — is in this 1920×1080
    space). Read the real coordinates of what you will point at or frame; never guess where
-   Athens is on a map. **A data map** (its folio.json entry has a `bbox`) gives exact positions
+   Athens is on a map. On a plate the grid also boxes every **face** in green and prints the
+   centres — aim a camera stop at a person by their face, not their torso. **A data map** (its folio.json entry has a `bbox`) gives exact positions
    instead: `venv/bin/python scripts/folio.py pins <video> <map_id> [Name=lon,lat …]` prints every
    pin in the folio.json entry plus any you add — use those numbers for `Pin`s, `Tag` leaders and
    route waypoints (sea routes: add waypoints off the coasts the same way).
@@ -129,6 +130,12 @@ Every component takes `at` (cue or seconds) and most take `until` (exit).
   OUTSIDE the Plate (screen space), and a label over a picture is usually unnecessary once
   the camera is showing the thing. A camera move counts as the scene "changing". Check each
   stop in its still: the thing named must be framed, not cut by the edge or the caption band.
+  - **Faces whole.** A stop framing a person shows the WHOLE face with air above it — the
+    framed point sits at 44% of the screen height, so at zoom 1.8 the frame reaches only
+    ~265 px (image space) above `on`; centring on a figure's chest at 1.8+ cuts the head off.
+    Lint ERRORS on a stop (as it lands and after its drift-in) that cuts the framed subject's
+    face, and prints a framing that fixes it; a close-up that leaves faces OUT entirely
+    (hands, a bowl, a sword) is fine.
 - `<Ink src x y w at? until? draw? then? rotate? backing?>` — an object cutout (transparent paper;
   `backing={0.9}` lays a soft paper glow behind it so a plate doesn't show through its pages),
   positioned by CENTRE; `draw` wipes it on like a pen; `then` cross-fades to later states

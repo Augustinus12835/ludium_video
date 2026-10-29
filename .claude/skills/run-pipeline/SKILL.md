@@ -169,7 +169,9 @@ Skip any step whose output already exists. Book and PPTX sources arrive with
    `segment_concepts.py pipeline/<L> --single-video --folio`; count ≥ 2 → render
    `segment --content … --folio` and apply as below. **Math/technical:** very short content (a
    single self-contained chapter or question) can skip straight to
-   `segment_concepts.py pipeline/<L> --single-video`. Otherwise:
+   `segment_concepts.py pipeline/<L> --single-video`. Never use `target_video_count` for them —
+   that is the folio count, and it returns 1 for a whole 40-minute lecture that should be several
+   short concept videos. Otherwise:
    `render_step_prompt.py segment --content pipeline/<L>/content_cleaned.txt` → one subagent
    returns anchor-based JSON → save → `segment_concepts.py pipeline/<L> --apply <response>`.
    On "Anchor split failed", re-spawn with the error appended.

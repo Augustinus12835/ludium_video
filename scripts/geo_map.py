@@ -269,6 +269,34 @@ def raster_vectors(bbox, projection, w, h, rivers: bool):
     return lakes.astype(bool), riv
 
 
+def raster_land(bbox, projection, w, h):
+    """Natural Earth 10m land polygons as a mask (for low-lying deltas the DEM puts at sea level)."""
+    import cv2
+    W, E, N, S = bbox
+    fy = merc if projection == "mercator" else (lambda v: v)
+    yN, yS = fy(N), fy(S)
+
+    def pts(ring):
+        a = np.asarray(ring, np.float64)
+        if projection == "mercator":
+            la = np.radians(np.clip(a[:, 1], -85, 85))
+            yy = np.degrees(np.log(np.tan(np.pi / 4 + la / 2)))
+        else:
+            yy = a[:, 1]
+        return np.stack([(a[:, 0] - W) / (E - W) * w, (yN - yy) / (yN - yS) * h], 1)
+
+    m = np.zeros((h, w), np.uint8)
+    for f in vector("ne_10m_land")["features"]:
+        for poly in _rings(f["geometry"]):
+            a = np.asarray(poly[0])
+            if a[:, 0].max() < W or a[:, 0].min() > E or a[:, 1].max() < S or a[:, 1].min() > N:
+                continue
+            cv2.fillPoly(m, [np.round(pts(poly[0]) * 4).astype(np.int32)], 1, cv2.LINE_8, shift=2)
+            for hole in poly[1:]:
+                cv2.fillPoly(m, [np.round(pts(hole) * 4).astype(np.int32)], 0, cv2.LINE_8, shift=2)
+    return m.astype(bool)
+
+
 def hillshade(dem, bbox, projection, w, h, az=315.0, alt=45.0):
     W, E, N, S = bbox
     _, lat = grid_lonlat(bbox, projection, w, h)
@@ -345,6 +373,23 @@ def render(bbox, out: Path, source="auto", projection="mercator", size=(3840, 21
         land = cv2.GaussianBlur(dem, (0, 0), 2.0 * k) > 1.0
         it = max(1, round(2 * k))
         land = ndi.binary_closing(ndi.binary_opening(np.pad(land, 6, mode="edge"), iterations=it), iterations=it)[6:-6, 6:-6]
+        # The tiles carry no bathymetry here (sea = 0 m), so a delta at or below sea level (e.g. the Nobi
+        # plain round Nagoya) drowned. Natural Earth's land polygons restore it — but NE 10m
+        # is a 1:10M coast, so on a close window (Attica, ~26 km wide) its polygons also spill
+        # straight-edged slivers into straits (Salamis) and fill lagoons (Venice). What tells them
+        # apart is the DEM itself: open water is flat 0 m, while a drowned lowland carries real
+        # heights a little above or below sea level (Nobi: median -0.25 m, 5% at exactly 0; the
+        # Salamis slivers: 85% exactly 0). So NE land is restored only where the DEM is mostly not flat.
+        # (A width test — keep only NE additions wider than ~1.5 km — lost the Nobi plain, whose
+        # drowned area is riddled with levees and towns above 1 m, so no part of it measured wide.)
+        added = raster_land(fb, projection, w, h) & ~land
+        if added.any():
+            m_px = (fb[1] - fb[0]) * 111320 * np.cos(np.radians((fb[2] + fb[3]) / 2)) / w
+            s = max(2.0, 150.0 / m_px)
+            nonflat = cv2.GaussianBlur((np.abs(dem) > 0.05).astype(np.float32), (0, 0), s)
+            mu = cv2.GaussianBlur(dem, (0, 0), s)
+            sd = np.sqrt(np.maximum(cv2.GaussianBlur(dem * dem, (0, 0), s) - mu * mu, 0))
+            land |= added & (nonflat > 0.5) & (sd > 0.05)     # sd: a lake surface is flat at its own level (Bafa)
         relief = np.clip(hillshade(dem, fb, projection, w, h) / 0.80, 0, 1)
         lakes, river = raster_vectors(fb, projection, w, h, rivers=(fb[1] - fb[0]) >= 3)
         river = river * land

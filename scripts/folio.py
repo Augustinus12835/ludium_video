@@ -1004,10 +1004,21 @@ def cmd_grid(a) -> int:
     for gy in range(0, im.height, 100):
         d.line([(0, gy), (im.width, gy)], fill=(30, 60, 200, 150 if gy % 500 else 255), width=1)
         d.text((3, gy + 3), str(gy), fill=(30, 60, 200, 255), font=font)
+    fcs = []
+    if asset_kind(folio, x) == "plate":
+        # Faces (green, with centre): camera stops frame a figure's face WHOLE — lint errors on a
+        # stop that cuts the subject's face (scripts/utils/plate_faces.py).
+        from scripts.utils import plate_faces
+        fcs = plate_faces.faces(asset_file(vd, folio, x))
+        for fx, fy, fw, fh, _ in fcs:
+            d.rectangle([fx, fy, fx + fw, fy + fh], outline=(20, 150, 40, 255), width=3)
+            d.text((fx, fy + fh + 3), f"{fx + fw // 2},{fy + fh // 2}", fill=(20, 150, 40, 255), font=font)
     out = vd / "folio_build" / f"grid_{a.asset}.png"
     out.parent.mkdir(exist_ok=True)
     im.convert("RGB").save(out)
     print(f"grid {out}  ({im.width}×{im.height})")
+    if fcs:
+        print("faces (centre x,y · height): " + "  ".join(f"[{fx + fw // 2}, {fy + fh // 2}]·{fh}" for fx, fy, fw, fh, _ in fcs))
     return 0
 
 
@@ -1421,6 +1432,14 @@ def lint_scene(vd, folio, tl, s) -> tuple:
         ce, cw = camera_rhythm(m.group(2), a["id"], lim, lambda ph, n=None: resolve_cue(words, flat, s, ph, n)[0])
         errs += ce
         warns += cw
+        tag = tsx[m.start():m.end()]
+        if not re.search(r"\bbox\s*=", tag):       # full-bleed plates only (inset boxes vary)
+            then_srcs = re.findall(r"""\bthen\s*=\s*\{\[.*?src\s*:\s*['"]([\w\-]+)['"]""", tag, re.S)
+            fe, fw = camera_faces(vd, folio, m.group(2), a["id"], then_srcs,
+                                  lambda ph, n=None: resolve_cue(words, flat, s, ph, n)[0],
+                                  (s["f1"] - s["f0"]) / FPS)
+            errs += fe
+            warns += fw
     for m in re.finditer(r"\b(?:y|top)\s*[=:]\s*\{?\s*(\d{3,4})", tsx):
         if int(m.group(1)) > 872:
             warns.append(f"y={m.group(1)} is inside the caption band (872–1006)")
@@ -1446,10 +1465,9 @@ CAM_MIN_ZOOM_STEP = 1.3  # zoom ratio a move must change by …
 CAM_MIN_PAN = 0.25       # … or the share of the visible frame it must travel
 
 
-def camera_rhythm(track: str, aid: str, lim: float, cue_t) -> list:
-    """(errors, warnings) for a <Plate camera> track. Errors: a move that interrupts the
-    last one, and a nudge too small to read as a new shot. Warnings: a move that crowds
-    the last one, and a pan that never frames a subject."""
+def parse_cam_stops(track: str, cue_t) -> list:
+    """A <Plate camera> track's stops, in order: {t, on, z, dur, drift, label}. `t` is
+    scene-relative seconds (cues resolved by cue_t); stops whose cue is not found are dropped."""
     stops = []
     for m in CAM_STOP_RE.finditer(track):
         body = m.group(1)
@@ -1462,9 +1480,19 @@ def camera_rhythm(track: str, aid: str, lim: float, cue_t) -> list:
         on = re.search(r"\bon\s*:\s*\[\s*([\d.]+)\s*,\s*([\d.]+)\s*\]", body)
         z = re.search(r"\bzoom\s*:\s*([\d.]+)", body)
         d = re.search(r"\bdur\s*:\s*([\d.]+)", body)
+        dr = re.search(r"\bdrift\s*:\s*([\d.]+)", body)
         stops.append({"t": t, "on": (float(on.group(1)), float(on.group(2))) if on else None,
                       "z": float(z.group(1)) if z else (1.8 if on else 1.0),
-                      "dur": float(d.group(1)) if d else 1.8, "label": at.group(2) or at.group(3)})
+                      "dur": float(d.group(1)) if d else 1.8,
+                      "drift": float(dr.group(1)) if dr else 0.006, "label": at.group(2) or at.group(3)})
+    return stops
+
+
+def camera_rhythm(track: str, aid: str, lim: float, cue_t) -> list:
+    """(errors, warnings) for a <Plate camera> track. Errors: a move that interrupts the
+    last one, and a nudge too small to read as a new shot. Warnings: a move that crowds
+    the last one, and a pan that never frames a subject."""
+    stops = parse_cam_stops(track, cue_t)
     errs, out, prev, landed = [], [], None, None
     for s in stops:
         if s["on"] is None and prev:
@@ -1499,6 +1527,52 @@ def camera_rhythm(track: str, aid: str, lim: float, cue_t) -> list:
             errs.append(f"camera on '{aid}' pulls out at \"{w['label']}\" then pushes back in at \"{n_['label']}\" "
                         f"— a detour; move straight to the next subject (one move), or hold the wide ≥ {CAM_DETOUR_HOLD:g} s")
     return errs, out
+
+
+def camera_faces(vd, folio, track: str, src: str, then_srcs: list, cue_t, dur: float) -> tuple:
+    """(errors, warnings) for faces a <Plate camera> track cuts with the frame edge (a stop
+    framed on a figure's chest at zoom 1.8 showed a headless queen). Each stop is checked as it lands
+    and at the end of its hold (the drift-in tightens it); faces come from the plate and its
+    then-states (scripts/utils/plate_faces.py)."""
+    from scripts.utils import plate_faces
+    amap = {x["id"]: x for x in folio["assets"]}
+    fcs = []
+    for sid in [src] + then_srcs:
+        if sid in amap:
+            fcs += plate_faces.faces(asset_file(vd, folio, amap[sid]))
+    fcs = plate_faces.dedupe(fcs)
+    if not fcs:
+        return [], []
+    stops = parse_cam_stops(track, cue_t)
+    errs, warns, seen = [], [], set()
+    prev_on = (960.0, 540.0)
+    for i, st in enumerate(stops):
+        on = st["on"] or prev_on
+        prev_on = on
+        land = st["t"] + (st["dur"] if i else 0)
+        end = stops[i + 1]["t"] if i + 1 < len(stops) else dur
+        z_end = st["z"] * (1 + st["drift"] * max(0.0, end - land))
+        where = f"camera on '{src}' at \"{st['label']}\" (on [{on[0]:g}, {on[1]:g}], zoom {st['z']:g})"
+        probs = {}
+        for z in (st["z"], z_end):
+            for sev, msg, f in plate_faces.check_stop(fcs, on, z):
+                k = tuple(f[:4])
+                if k not in probs or (sev == "error" and probs[k][0] != "error"):
+                    probs[k] = (sev, msg, f)
+        cut = [p[2] for p in probs.values() if p[0] == "error"]
+        fix = ""
+        if cut:
+            sug = plate_faces.suggest(cut, on, z_end)
+            fix = (f" — frame it whole: on [{sug[1][0]}, {sug[1][1]}]" if sug and sug[0] == "on"
+                   else f" — frame it whole: zoom ≤ {sug[1]:g}" if sug
+                   else " — frame the face whole or leave it out of the shot")
+        for sev, msg, f in probs.values():
+            key = (st["label"], tuple(f[:4]), sev)
+            if key in seen:
+                continue
+            seen.add(key)
+            (errs if sev == "error" else warns).append(f"{where}: {msg}" + (fix if sev == "error" else ""))
+    return errs, warns
 
 
 def visible_text(tsx: str) -> str:

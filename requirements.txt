@@ -27,6 +27,8 @@ python-pptx>=1.0.0
 # Folio (humanities) mode — see README "Humanities pipeline (folio)"
 openai>=1.40.0            # gpt-image plates, portraits, objects (OPENAI_API_KEY)
 pymupdf>=1.24.0           # obp_pdf_to_markdown.py: open-textbook PDFs with a text layer
+opencv-python-headless>=4.8.0  # geo_map.py data maps; plate_faces.py face boxes (YuNet)
+scipy>=1.10.0             # geo_map.py land-mask clean-up
 # Gemini images (grounded maps) are plain REST calls through `requests` (GOOGLE_CLOUD_API_KEY)
 
 # Optional: the on-screen presenter (scripts/presenter.py) cuts the person out of your photo

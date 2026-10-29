@@ -26,7 +26,8 @@ compaction):
   - powers of ten: "ten to the minus thirty-four" -> 10⁻³⁴.
   - phrases: ≤ ≥ ± √ (all modes); ≠ ∞ (math mode).
   - math mode: Greek names -> symbols ("delta X"/"delta-X" -> ΔX, "lambda two"
-    -> λ₂), differentials ("d y over d x" -> dy/dx, "d squared y" -> d²y,
+    -> λ₂; delta is Δ except as a density: "delta d A"/"delta d V" -> δ dA/δ dV and
+    "small/lowercase [Greek letter] delta" -> δ), differentials ("d y over d x" -> dy/dx, "d squared y" -> d²y,
     "partial f" -> ∂f), letter subscripts ("X-zero"/"X zero" -> X₀, "v one" -> v₁,
     "epsilon-naught"/"v naught" -> ε₀/v₀), hats ("i-hat"/"i hat" -> î), "squared"/"cubed"
     -> ²/³, unary "negative five" -> -5, "over" between math tokens -> "/".
@@ -670,8 +671,52 @@ def _pass_letter_size(toks: List[_Tok]) -> None:
         i += 1
 
 
+_DENSITY_AREA = {'dA', 'dV', 'd-A', 'd-V'}
+_SIZE_WORDS = {'small', 'lowercase', 'lower-case'}
+
+
+def _pass_density_delta(toks: List[_Tok]) -> None:
+    """Lowercase δ where "delta" is a DENSITY, not an increment (mass and moments over a region).
+
+    1) "delta d A" / "delta d V" (also legacy "delta dA", "delta d-A") -> δ dA: a density
+       weight sits right before the area/volume element; an increment never does. Only A and V:
+       no other "delta d <letter>" turned up in our narration.
+    3) "the density, delta" -> δ (a following letter/subscript keeps the increment Δ).
+    2) "small / lowercase [Greek letter] delta" -> "small [Greek letter] δ" — unless the delta
+       names an increment ("small delta-t", "how small delta-x must be", "small delta X").
+    """
+    for i, t in enumerate(toks):
+        if t.mathy or t.core.lower() != 'delta':
+            continue
+        nxt = toks[i + 1] if i + 1 < len(toks) else None
+        nxt2 = toks[i + 2] if i + 2 < len(toks) else None
+        if nxt is not None and not t.trail and not nxt.lead:
+            if nxt.core in _DENSITY_AREA or (
+                    nxt.core == 'd' and nxt2 is not None and not nxt.trail and not nxt2.lead
+                    and nxt2.core in ('A', 'V')):
+                t.core, t.mathy = 'δ', True
+                continue
+        # 3) "the density, delta" / "density delta" naming the symbol (comma allowed)
+        if i >= 1 and toks[i - 1].core.lower() == 'density' and not (
+                nxt is not None and not t.trail and not nxt.lead and (
+                    _is_single_letter(nxt.core) or nxt.core.lower() in _SUB_WORDS)):
+            t.core, t.mathy = 'δ', True
+            continue
+        j = i - 1
+        if j >= 1 and toks[j].core.lower() == 'letter' and toks[j - 1].core.lower() == 'greek':
+            j -= 2
+        if j < 0 or toks[j].core.lower() not in _SIZE_WORDS or \
+                not _clean_between(toks, j, i + 1):
+            continue
+        if nxt is not None and not t.trail and not nxt.lead and (
+                _is_single_letter(nxt.core) or nxt.core.lower() in _SUB_WORDS):
+            continue                       # "small delta X": an increment
+        t.core, t.mathy = 'δ', True
+
+
 def _pass_math_tokens(toks: List[_Tok]) -> None:
     """Math-mode single-token and adjacency conversions."""
+    _pass_density_delta(toks)
     # 1) token-internal hyphen forms: delta-t, sigma-two, X-zero, lambda-I
     for i, t in enumerate(toks):
         parts = _hyphen_parts(t.core)
@@ -1166,6 +1211,17 @@ _SELF_TESTS = [
     ('C one is a constant', True, '', 'C₁ is a constant'),
     ('mew-hat and mew hat and theta hat, mew one, kai squared', True, '', 'μ̂ and μ̂ and θ̂, μ₁, χ²'),
     ('divided by r one two squared, m one m two', True, '', 'divided by r₁₂², m₁ m₂'),
+    # density δ vs increment Δ
+    ('the double integral over R of delta d A', True, '', 'the double integral over R of δ dA'),
+    ('of delta d A, the density, delta, times the area', True, '', 'of δ dA, the density, δ, times the area'),
+    ('the density delta A is not the density', True, '', 'the density ΔA is not the density'),
+    ('x delta d A and delta dA and delta d-A and delta d V', True, '', 'x δ dA and δ dA and δ d-A and δ dV'),
+    ('written with the small Greek letter delta, is', True, '', 'written with the small Greek letter δ, is'),
+    ('lowercase delta and lowercase Greek letter delta', True, '', 'lowercase δ and lowercase Greek letter δ'),
+    ('area delta A and mass delta m', True, '', 'area ΔA and mass Δm'),
+    ('take delta-t small, a small delta-t, how small delta-x, small delta X', True, '',
+     'take Δt small, a small Δt, how small Δx, small ΔX'),
+    ('delta m over delta A', True, '', 'Δm/ΔA'),
 ]
 
 

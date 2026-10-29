@@ -156,6 +156,11 @@ pull-back is off (`arc: true` opts in), and a wide stop held < 4 s between two t
 a detour (lint ERROR). Coordinates
 (overlays, camera stops, `grid`) stay in 1920×1080 image space. A folio.json without
 `canvas` keeps 1920×1080 plates; `"canvas"` on one asset overrides.
+**Faces whole.** Every plate's faces are detected once (OpenCV YuNet,
+`scripts/utils/plate_faces.py`, cached as `<id>.faces.json`), `grid` boxes them, and lint
+replays each camera stop (as it lands and at the end of its drift-in) and ERRORS when the
+framed subject's face is cut by the frame edge — with a corrected `on`/`zoom`. Bystanders cut
+nearly in half warn. A face the plate itself crops at zoom 1 is not checked.
 
 Every image is normalised to the house duotone; plates/maps are trimmed of platemarks; objects
 become RGBA ink cutouts (a then-state shares its base's crop). Post-processing changes never
